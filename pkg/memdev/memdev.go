@@ -64,3 +64,8 @@ func (md *MemDev) Write(p []byte) (int, error) {
 	md.offset += int64(n)
 	return n, nil
 }
+
+// Sync does nothing, it is here just to fit the interface.
+func (md *MemDev) Sync() error {
+	return nil
+}

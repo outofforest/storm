@@ -223,6 +223,13 @@ func TestWrite(t *testing.T) {
 	assertT.EqualValues([]byte{0x10, 0x10, 0x10, 0x11, 0x12, 0x10, 0x11, 0x12, 0x08, 0x10}, dev.data)
 }
 
+func TestSync(t *testing.T) {
+	assertT := assert.New(t)
+
+	dev := newDev()
+	assertT.NoError(dev.Sync())
+}
+
 func newDev() *MemDev {
 	const size = 10
 
