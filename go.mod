@@ -3,6 +3,7 @@ module github.com/outofforest/storm
 go 1.20
 
 require (
+	github.com/outofforest/photon v0.2.0
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.8.4
 )

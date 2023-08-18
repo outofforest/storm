@@ -1,16 +1,12 @@
-package storm
+package types
 
 import (
 	"crypto/sha256"
-	"unsafe"
 )
 
 const (
 	// BlockSize is the size of the data unit used by storm.
 	BlockSize = 128 * 1024 // 128 KiB
-
-	// CachedBlockSize is the size of the cached block stored in memory.
-	CachedBlockSize = BlockSize + unsafe.Sizeof(CacheHeader{})
 
 	// HashSize is the size of the hash used in tree.
 	HashSize = sha256.Size
@@ -29,6 +25,11 @@ const (
 	PointerBlockType
 	DataBlockType
 )
+
+// Block defines the constraint for generics using block types.
+type Block interface {
+	SingularityBlock | PointerBlock | DataBlock
+}
 
 // BlockBytes represents the raw data bytes of the block.
 type BlockBytes [BlockSize]byte
@@ -55,19 +56,8 @@ type BlockAddress uint64
 
 // Pointer is a pointer to other block.
 type Pointer struct {
-	Address    BlockAddress
 	DataHash   Hash
 	StructHash Hash
-}
-
-// CacheHeader describes the cached block.
-type CacheHeader struct {
-	Address BlockAddress
-	Type    BlockType
-}
-
-// CachedBlock represents block cached in memory.
-type CachedBlock[T comparable] struct {
-	Header CacheHeader
-	Block  T
+	Address    BlockAddress
+	Type       BlockType
 }
