@@ -1,16 +1,21 @@
 package cache
 
 import (
+	"unsafe"
+
 	"github.com/outofforest/photon"
 
 	"github.com/outofforest/storm/types"
 )
 
 const (
+	// alignment specifies the alignment requirements of the architecture
+	alignment = 8
+
 	// CacheHeaderSize is the maximum size of the header in cached block.
-	// This number is hardcoded instead of taking `unsafe.Sizeof(Header{})` to ensure proper alignment
-	// of the following block structure.
-	CacheHeaderSize = 8
+	// This magic ensures that the header size is a multiplication of 8, meaning that block data following the header are
+	// correctly aligned.
+	CacheHeaderSize = ((unsafe.Sizeof(Header{})-1)/alignment + 1) * alignment
 
 	// CachedBlockSize is the size of the cached block stored in memory.
 	CachedBlockSize = types.BlockSize + CacheHeaderSize
