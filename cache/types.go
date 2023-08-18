@@ -24,5 +24,5 @@ type Header struct {
 // CachedBlock represents block stored in cache.
 type CachedBlock[T types.Block] struct {
 	Header *Header
-	Block  *photon.Union[T]
+	Block  photon.Union[T]
 }
