@@ -25,7 +25,8 @@ type BlockType byte
 // Block types. singularity block is not here because there is only one such block, it is always kept separately
 // and never cached.
 const (
-	PointerBlockType BlockType = iota
+	FreeBlockType BlockType = iota
+	PointerBlockType
 	DataBlockType
 )
 
