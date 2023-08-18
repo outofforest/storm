@@ -6,11 +6,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-var (
-	_ io.Seeker = &MemDev{}
-	_ io.Reader = &MemDev{}
-	_ io.Writer = &MemDev{}
-)
+var _ io.ReadWriteSeeker = &MemDev{}
 
 // MemDev simulates device io operations in memory.
 type MemDev struct {
