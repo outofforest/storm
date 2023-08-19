@@ -27,16 +27,31 @@ func TestInit(t *testing.T) {
 	_, err = dev.Read(sBlock.B)
 	requireT.NoError(err)
 
+	_, err = dev.Seek(types.BlockSize, io.SeekStart)
+	requireT.NoError(err)
+
+	dataBlock := photon.NewFromValue(&types.DataBlock{})
+	_, err = dev.Read(dataBlock.B)
+	requireT.NoError(err)
+
+	dataChecksum := sha256.Sum256(dataBlock.B)
+
 	requireT.EqualValues(stormSubject, sBlock.V.StormID&stormSubject)
 	requireT.EqualValues(dev.Size()/types.BlockSize, int64(sBlock.V.NBlocks))
 	requireT.Less(dev.Size(), int64(sBlock.V.NBlocks+1)*types.BlockSize)
-	requireT.EqualValues(0, sBlock.V.LastAllocatedBlock)
+	requireT.EqualValues(1, sBlock.V.LastAllocatedBlock)
+	requireT.EqualValues(1, sBlock.V.Data.Address)
+	requireT.EqualValues(types.DataBlockType, sBlock.V.Data.Type)
+	requireT.EqualValues(dataChecksum, sBlock.V.Data.StructChecksum)
+	requireT.EqualValues(dataChecksum, sBlock.V.Data.DataChecksum)
 
 	checksum := sBlock.V.StructChecksum
 	sBlock.V.StructChecksum = types.Hash{}
 	checksumExpected := types.Hash(sha256.Sum256(sBlock.B))
 
 	requireT.Equal(checksumExpected, checksum)
+
+	// TODO (wojciech): Once data block contains fields test them
 }
 
 func TestOverwrite(t *testing.T) {

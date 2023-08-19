@@ -62,8 +62,8 @@ type BlockAddress uint64
 
 // Pointer is a pointer to other block.
 type Pointer struct {
-	DataChecksum   Hash
 	StructChecksum Hash
+	DataChecksum   Hash
 	Address        BlockAddress
 	Type           BlockType
 }
