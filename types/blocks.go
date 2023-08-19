@@ -36,9 +36,9 @@ type BlockBytes [BlockSize]byte
 
 // SingularityBlock is the starting block of the store. Everything starts and ends here.
 type SingularityBlock struct {
-	Checksum Hash
-	StormID  uint64
-	NBlocks  uint64
+	StructChecksum Hash
+	StormID        uint64
+	NBlocks        uint64
 
 	// TODO (wojciech): Replace with correct (de)allocation mechanism
 	LastAllocatedBlock BlockAddress

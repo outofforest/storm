@@ -45,7 +45,7 @@ func Initialize(dev Dev, overwrite bool) error {
 		StormID: rand.Uint64() | stormSubject,
 		NBlocks: uint64(dev.Size() / types.BlockSize),
 	})
-	sBlock.V.Checksum = sha256.Sum256(sBlock.B)
+	sBlock.V.StructChecksum = sha256.Sum256(sBlock.B)
 
 	if _, err := dev.Write(sBlock.B); err != nil {
 		return errors.WithStack(err)

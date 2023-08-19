@@ -3,8 +3,6 @@ package cache
 import (
 	"unsafe"
 
-	"github.com/outofforest/photon"
-
 	"github.com/outofforest/storm/types"
 )
 
@@ -21,13 +19,18 @@ const (
 	CachedBlockSize = types.BlockSize + CacheHeaderSize
 )
 
+// BlockState is the enum representing the state of the block.
+type BlockState byte
+
+// Enum of possible block states
+const (
+	FreeBlockState BlockState = iota
+	FetchedBlockState
+	NewBlockState
+)
+
 // Header stores the metadata of cached block.
 type Header struct {
-	Address types.BlockAddress // if 0 it means slot is empty, singularity block is cached independently, so it doesn't collide
-}
-
-// CachedBlock represents block stored in cache.
-type CachedBlock[T types.Block] struct {
-	Header Header
-	Block  photon.Union[T]
+	Address types.BlockAddress
+	State   BlockState
 }
