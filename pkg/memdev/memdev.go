@@ -1,6 +1,7 @@
 package memdev
 
 import (
+	"crypto/rand"
 	"io"
 
 	"github.com/pkg/errors"
@@ -17,9 +18,21 @@ type MemDev struct {
 
 // New returns new memdev.
 func New(size int64) *MemDev {
+	data := make([]byte, size)
+
+	// This is done to not make any assumptions about 0x00 being default bytes anywhere in tests.
+	// In real storage devices 0x00s cannot be expected.
+	n, err := rand.Read(data)
+	if err != nil {
+		panic(errors.WithStack(err))
+	}
+	if n != len(data) {
+		panic(errors.New("length mismatch"))
+	}
+
 	return &MemDev{
 		size: size,
-		data: make([]byte, size),
+		data: data,
 	}
 }
 
