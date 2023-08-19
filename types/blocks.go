@@ -36,6 +36,10 @@ type BlockBytes [BlockSize]byte
 
 // SingularityBlock is the starting block of the store. Everything starts and ends here.
 type SingularityBlock struct {
+	Checksum Hash
+	StormID  uint64
+	NBlocks  uint64
+
 	Data Pointer
 }
 
@@ -56,8 +60,8 @@ type BlockAddress uint64
 
 // Pointer is a pointer to other block.
 type Pointer struct {
-	DataHash   Hash
-	StructHash Hash
-	Address    BlockAddress
-	Type       BlockType
+	DataChecksum   Hash
+	StructChecksum Hash
+	Address        BlockAddress
+	Type           BlockType
 }

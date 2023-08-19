@@ -230,6 +230,13 @@ func TestSync(t *testing.T) {
 	assertT.NoError(dev.Sync())
 }
 
+func TestSize(t *testing.T) {
+	assertT := assert.New(t)
+
+	dev := newDev()
+	assertT.EqualValues(10, dev.Size())
+}
+
 func newDev() *MemDev {
 	const size = 10
 
