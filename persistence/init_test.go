@@ -28,8 +28,9 @@ func TestInit(t *testing.T) {
 	requireT.NoError(err)
 
 	requireT.EqualValues(stormSubject, sBlock.V.StormID&stormSubject)
-	requireT.EqualValues(uint64(dev.Size()/types.BlockSize), sBlock.V.NBlocks)
-	requireT.Less(uint64(dev.Size()), (sBlock.V.NBlocks+1)*types.BlockSize)
+	requireT.EqualValues(dev.Size()/types.BlockSize, int64(sBlock.V.NBlocks))
+	requireT.Less(dev.Size(), int64(sBlock.V.NBlocks+1)*types.BlockSize)
+	requireT.EqualValues(0, sBlock.V.LastAllocatedBlock)
 
 	checksum := sBlock.V.Checksum
 	sBlock.V.Checksum = types.Hash{}
@@ -72,6 +73,7 @@ func TestOverwrite(t *testing.T) {
 	requireT.NotEqual(previousSBlock.V.StormID, newSBlock.V.StormID)
 	requireT.NotEqual(previousSBlock.V.Checksum, newSBlock.V.Checksum)
 	requireT.Equal(previousSBlock.V.NBlocks, newSBlock.V.NBlocks)
+	requireT.Equal(previousSBlock.V.LastAllocatedBlock, newSBlock.V.LastAllocatedBlock)
 }
 
 func TestTooSmall(t *testing.T) {

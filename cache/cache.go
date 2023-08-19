@@ -1,44 +1,69 @@
 package cache
 
 import (
-	"io"
-
 	"github.com/outofforest/photon"
 	"github.com/pkg/errors"
 
+	"github.com/outofforest/storm/persistence"
 	"github.com/outofforest/storm/types"
 )
 
+const freeSlotAddress = 0
+
 // Cache caches blocks.
 type Cache struct {
-	source io.ReadWriteSeeker
-	data   []byte
+	store *persistence.Store
+	size  int64
+	data  []byte
+
+	singularityBlock CachedBlock[types.SingularityBlock]
 }
 
 // New creates new cache.
-func New(source io.ReadWriteSeeker, size uint32) *Cache {
-	return &Cache{
-		source: source,
-		data:   make([]byte, size),
+func New(store *persistence.Store, size int64) (*Cache, error) {
+	sBlock := photon.NewFromValue(&types.SingularityBlock{})
+	if err := store.ReadBlock(0, sBlock.B); err != nil {
+		return nil, err
 	}
+
+	return &Cache{
+		store: store,
+		size:  size,
+		data:  make([]byte, size),
+		singularityBlock: CachedBlock[types.SingularityBlock]{
+			Header: Header{
+				Address: 0,
+			},
+			Block: sBlock,
+		},
+	}, nil
 }
 
 // Get retrieves block data from cache, if needed block is loaded from persistent source.
-func (c *Cache) Get(address types.BlockAddress) (*Header, []byte, error) {
-	if _, err := c.source.Seek(int64(address*types.BlockSize), io.SeekStart); err != nil {
-		return nil, nil, err
+func (c *Cache) Get(address types.BlockAddress) (Header, []byte, error) {
+	if address == 0 {
+		return c.singularityBlock.Header, c.singularityBlock.Block.B, nil
 	}
-	n, err := c.source.Read(c.data[CacheHeaderSize:CachedBlockSize])
-	if err != nil {
-		return nil, nil, err
-	}
-	if n != types.BlockSize {
-		return nil, nil, errors.Errorf("expected to read %d bytes, but got %d", types.BlockSize, n)
-	}
-	header := photon.NewFromBytes[Header](c.data[:CacheHeaderSize])
-	header.V.Address = address
 
-	return header.V, c.data[CacheHeaderSize:CachedBlockSize], nil
+	// TODO (wojciech): Implement open addressing
+	// TODO (wojciech): Implement cache pruning if there is no free space
+
+	for offset := int64(0); offset < c.size; offset += CachedBlockSize {
+		header := photon.NewFromBytes[Header](c.data[offset:])
+		if header.V.Address == address {
+			return *header.V, c.data[offset+CacheHeaderSize : offset+CachedBlockSize], nil
+		}
+
+		if header.V.Address == freeSlotAddress {
+			header.V.Address = address
+			if err := c.store.ReadBlock(address, c.data[offset+CacheHeaderSize:offset+CachedBlockSize]); err != nil {
+				return Header{}, nil, err
+			}
+			return *header.V, c.data[offset+CacheHeaderSize : offset+CachedBlockSize], nil
+		}
+	}
+
+	return Header{}, nil, errors.New("cache space exhausted")
 }
 
 // GetBlock returns structure representing the block of the particular type.

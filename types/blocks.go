@@ -6,7 +6,7 @@ import (
 
 const (
 	// BlockSize is the size of the data unit used by storm.
-	BlockSize = 128 * 1024 // 128 KiB
+	BlockSize int64 = 128 * 1024 // 128 KiB
 
 	// HashSize is the size of the hash used in tree.
 	HashSize = sha256.Size
@@ -40,7 +40,9 @@ type SingularityBlock struct {
 	StormID  uint64
 	NBlocks  uint64
 
-	Data Pointer
+	// TODO (wojciech): Replace with correct (de)allocation mechanism
+	LastAllocatedBlock BlockAddress
+	Data               Pointer
 }
 
 // PointerBlock is the block forming tree. It contains pointers to other blocks.

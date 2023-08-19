@@ -63,17 +63,27 @@ func validateDev(dev Dev, overwrite bool) error {
 		return errors.Errorf("device is too small, minimum size is: %d bytes, provided: %d", minNBlocks*types.BlockSize, size)
 	}
 
-	if _, err := dev.Seek(0, io.SeekStart); err != nil {
-		return errors.WithStack(err)
+	sBlock, err := loadSingularityBlock(dev)
+	if err != nil {
+		return err
 	}
 
-	sBlock := photon.NewFromBytes[types.SingularityBlock](make([]byte, types.BlockSize))
-	if _, err := dev.Read(sBlock.B); err != nil {
-		return errors.WithStack(err)
-	}
 	if sBlock.V.StormID&stormSubject == stormSubject && !overwrite {
 		return errors.WithStack(ErrAlreadyInitialized)
 	}
 
 	return nil
+}
+
+func loadSingularityBlock(dev Dev) (photon.Union[types.SingularityBlock], error) {
+	if _, err := dev.Seek(0, io.SeekStart); err != nil {
+		return photon.Union[types.SingularityBlock]{}, errors.WithStack(err)
+	}
+
+	sBlock := photon.NewFromBytes[types.SingularityBlock](make([]byte, types.BlockSize))
+	if _, err := dev.Read(sBlock.B); err != nil {
+		return photon.Union[types.SingularityBlock]{}, errors.WithStack(err)
+	}
+
+	return sBlock, nil
 }
