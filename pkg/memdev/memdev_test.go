@@ -1,6 +1,7 @@
 package memdev
 
 import (
+	"bytes"
 	"io"
 	"testing"
 
@@ -235,6 +236,18 @@ func TestSize(t *testing.T) {
 
 	dev := newDev()
 	assertT.EqualValues(10, dev.Size())
+}
+
+func TestRandomness(t *testing.T) {
+	const size = 10
+
+	assertT := assert.New(t)
+
+	dev := New(size)
+	assertT.NotEqual(bytes.Repeat([]byte{0x00}, len(dev.data)), dev.data)
+
+	dev2 := New(size)
+	assertT.NotEqual(dev.data, dev2.data)
 }
 
 func newDev() *MemDev {
