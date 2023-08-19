@@ -32,8 +32,8 @@ func TestInit(t *testing.T) {
 	requireT.Less(dev.Size(), int64(sBlock.V.NBlocks+1)*types.BlockSize)
 	requireT.EqualValues(0, sBlock.V.LastAllocatedBlock)
 
-	checksum := sBlock.V.Checksum
-	sBlock.V.Checksum = types.Hash{}
+	checksum := sBlock.V.StructChecksum
+	sBlock.V.StructChecksum = types.Hash{}
 	checksumExpected := types.Hash(sha256.Sum256(sBlock.B))
 
 	requireT.Equal(checksumExpected, checksum)
@@ -71,7 +71,7 @@ func TestOverwrite(t *testing.T) {
 	_, err = dev.Read(newSBlock.B)
 	requireT.NoError(err)
 	requireT.NotEqual(previousSBlock.V.StormID, newSBlock.V.StormID)
-	requireT.NotEqual(previousSBlock.V.Checksum, newSBlock.V.Checksum)
+	requireT.NotEqual(previousSBlock.V.StructChecksum, newSBlock.V.StructChecksum)
 	requireT.Equal(previousSBlock.V.NBlocks, newSBlock.V.NBlocks)
 	requireT.Equal(previousSBlock.V.LastAllocatedBlock, newSBlock.V.LastAllocatedBlock)
 }
