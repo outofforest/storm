@@ -37,17 +37,35 @@ func Initialize(dev Dev, overwrite bool) error {
 		return err
 	}
 
+	dataBlock := photon.NewFromValue(&types.DataBlock{})
+	dataBlockChecksum := sha256.Sum256(dataBlock.B)
+
+	sBlock := photon.NewFromValue(&types.SingularityBlock{
+		StormID:            rand.Uint64() | stormSubject,
+		NBlocks:            uint64(dev.Size() / types.BlockSize),
+		LastAllocatedBlock: 1,
+		Data: types.Pointer{
+			StructChecksum: dataBlockChecksum,
+			DataChecksum:   dataBlockChecksum,
+			Address:        1,
+			Type:           types.DataBlockType,
+		},
+	})
+	sBlock.V.StructChecksum = sha256.Sum256(sBlock.B)
+
 	if _, err := dev.Seek(0, io.SeekStart); err != nil {
 		return errors.WithStack(err)
 	}
 
-	sBlock := photon.NewFromValue(&types.SingularityBlock{
-		StormID: rand.Uint64() | stormSubject,
-		NBlocks: uint64(dev.Size() / types.BlockSize),
-	})
-	sBlock.V.StructChecksum = sha256.Sum256(sBlock.B)
-
 	if _, err := dev.Write(sBlock.B); err != nil {
+		return errors.WithStack(err)
+	}
+
+	if _, err := dev.Seek(types.BlockSize, io.SeekStart); err != nil {
+		return errors.WithStack(err)
+	}
+
+	if _, err := dev.Write(dataBlock.B); err != nil {
 		return errors.WithStack(err)
 	}
 

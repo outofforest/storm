@@ -102,7 +102,7 @@ func TestWriteNewBlock(t *testing.T) {
 
 	// Fetching block before it is created returns an error
 
-	_, err = FetchBlock[types.PointerBlock](cache, 1)
+	_, err = FetchBlock[types.PointerBlock](cache, 2)
 	requireT.Error(err)
 
 	// Create new block
@@ -112,15 +112,15 @@ func TestWriteNewBlock(t *testing.T) {
 
 	address, err := NewBlock(cache, newBlock)
 	requireT.NoError(err)
-	requireT.Equal(types.BlockAddress(1), address)
+	requireT.Equal(types.BlockAddress(2), address)
 
 	// New block should be allocated
 
-	requireT.Equal(types.BlockAddress(1), cache.SingularityBlock().LastAllocatedBlock)
+	requireT.Equal(types.BlockAddress(2), cache.SingularityBlock().LastAllocatedBlock)
 
 	// Fetching block from cache should work now
 
-	block, err := FetchBlock[types.PointerBlock](cache, 1)
+	block, err := FetchBlock[types.PointerBlock](cache, 2)
 	requireT.NoError(err)
 	requireT.Equal(types.BlockAddress(21), block.Pointers[pointerIndex].Address)
 
@@ -133,7 +133,7 @@ func TestWriteNewBlock(t *testing.T) {
 	_, err = dev.Read(devSBlock.B)
 	requireT.NoError(err)
 
-	requireT.Equal(types.BlockAddress(0), devSBlock.V.LastAllocatedBlock)
+	requireT.Equal(types.BlockAddress(1), devSBlock.V.LastAllocatedBlock)
 
 	// Syncing changes
 
@@ -148,14 +148,14 @@ func TestWriteNewBlock(t *testing.T) {
 	_, err = dev.Read(devSBlock.B)
 	requireT.NoError(err)
 
-	_, err = dev.Seek(types.BlockSize, io.SeekStart)
+	_, err = dev.Seek(2*types.BlockSize, io.SeekStart)
 	requireT.NoError(err)
 
 	devNewBlock := photon.NewFromValue(&types.PointerBlock{})
 	_, err = dev.Read(devNewBlock.B)
 	requireT.NoError(err)
 
-	requireT.Equal(types.BlockAddress(1), devSBlock.V.LastAllocatedBlock)
+	requireT.Equal(types.BlockAddress(2), devSBlock.V.LastAllocatedBlock)
 	requireT.Equal(types.BlockAddress(21), devNewBlock.V.Pointers[pointerIndex].Address)
 
 	// Create new cache, read blocks and verify that new values are there
@@ -164,9 +164,9 @@ func TestWriteNewBlock(t *testing.T) {
 	requireT.NoError(err)
 
 	sBlock := cache2.SingularityBlock()
-	newBlock, err = FetchBlock[types.PointerBlock](cache2, 1)
+	newBlock, err = FetchBlock[types.PointerBlock](cache2, 2)
 	requireT.NoError(err)
 
-	requireT.Equal(types.BlockAddress(1), sBlock.LastAllocatedBlock)
+	requireT.Equal(types.BlockAddress(2), sBlock.LastAllocatedBlock)
 	requireT.Equal(types.BlockAddress(21), newBlock.Pointers[pointerIndex].Address)
 }
