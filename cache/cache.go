@@ -130,6 +130,15 @@ type CachedBlock[T types.Block] struct {
 	Block  T
 }
 
+// Address returns addrress of the block.
+func (cb CachedBlock[T]) Address() (types.BlockAddress, error) {
+	if cb.header.State == freeBlockState {
+		return 0, errors.New("block hasn't been allocated yet")
+	}
+
+	return cb.header.Address, nil
+}
+
 // Commit commits block changes to cache.
 func (cb CachedBlock[T]) Commit() (CachedBlock[T], error) {
 	if cb.header.State != newBlockState {

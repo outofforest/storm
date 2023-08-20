@@ -116,6 +116,12 @@ func TestCommitNewBlock(t *testing.T) {
 	requireT.Equal(types.BlockAddress(0), newBlock.header.Address)
 	requireT.Equal(freeBlockState, newBlock.header.State)
 
+	// Address method returns error
+
+	address, err := newBlock.Address()
+	requireT.Error(err)
+	requireT.Equal(types.BlockAddress(0), address)
+
 	// Block should be allocated after committing
 
 	newBlock, err = newBlock.Commit()
@@ -123,6 +129,12 @@ func TestCommitNewBlock(t *testing.T) {
 	requireT.Equal(types.BlockAddress(2), cache.SingularityBlock().LastAllocatedBlock)
 	requireT.Equal(types.BlockAddress(2), newBlock.header.Address)
 	requireT.Equal(newBlockState, newBlock.header.State)
+
+	// Address method should work now
+
+	address, err = newBlock.Address()
+	requireT.NoError(err)
+	requireT.Equal(types.BlockAddress(2), address)
 
 	// Fetching block from cache should work now
 
