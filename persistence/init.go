@@ -37,18 +37,16 @@ func Initialize(dev Dev, overwrite bool) error {
 		return err
 	}
 
-	dataBlock := photon.NewFromValue(&types.DataBlock{})
-	dataBlockChecksum := sha256.Sum256(dataBlock.B)
+	rootDataBlock := photon.NewFromValue(&types.PointerBlock{})
 
 	sBlock := photon.NewFromValue(&types.SingularityBlock{
 		StormID:            rand.Uint64() | stormSubject,
 		NBlocks:            uint64(dev.Size() / types.BlockSize),
 		LastAllocatedBlock: 1,
-		Data: types.Pointer{
-			StructChecksum: dataBlockChecksum,
-			DataChecksum:   dataBlockChecksum,
+		RootData: types.Pointer{
+			StructChecksum: sha256.Sum256(rootDataBlock.B),
+			DataChecksum:   pointerBlockDataChecksum(rootDataBlock.V),
 			Address:        1,
-			Type:           types.DataBlockType,
 		},
 	})
 	sBlock.V.StructChecksum = sha256.Sum256(sBlock.B)
@@ -65,7 +63,7 @@ func Initialize(dev Dev, overwrite bool) error {
 		return errors.WithStack(err)
 	}
 
-	if _, err := dev.Write(dataBlock.B); err != nil {
+	if _, err := dev.Write(rootDataBlock.B); err != nil {
 		return errors.WithStack(err)
 	}
 
@@ -104,4 +102,16 @@ func loadSingularityBlock(dev Dev) (photon.Union[types.SingularityBlock], error)
 	}
 
 	return sBlock, nil
+}
+
+func pointerBlockDataChecksum(pBlock *types.PointerBlock) types.Hash {
+	hasher := sha256.New()
+
+	for i, state := range pBlock.PointedBlockTypes {
+		if state != types.FreeBlockType {
+			hasher.Write(pBlock.Pointers[i].DataChecksum[:])
+		}
+	}
+
+	return types.Hash(hasher.Sum(nil))
 }

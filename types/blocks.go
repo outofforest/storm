@@ -42,16 +42,45 @@ type SingularityBlock struct {
 
 	// TODO (wojciech): Replace with correct (de)allocation mechanism
 	LastAllocatedBlock BlockAddress
-	Data               Pointer
+	RootData           Pointer
+}
+
+// Pointer is a pointer to other block.
+type Pointer struct {
+	StructChecksum Hash
+	DataChecksum   Hash
+	Address        BlockAddress
 }
 
 // PointerBlock is the block forming tree. It contains pointers to other blocks.
 type PointerBlock struct {
-	Pointers [PointersPerBlock]Pointer
+	NUsedPointers     uint64
+	Pointers          [PointersPerBlock]Pointer
+	PointedBlockTypes [PointersPerBlock]BlockType
+}
+
+// TODO (wojciech): Currently data blocks store only a fixed set of key-value pairs with their types being strict.
+
+// RecordState defines the state of the data record.
+type RecordState byte
+
+// Record states.
+const (
+	FreeRecordState RecordState = iota
+	DefinedRecordState
+)
+
+// Record stores the key-value pair
+type Record struct {
+	Key   [32]byte
+	Value uint64
 }
 
 // DataBlock contains key-value pairs.
 type DataBlock struct {
+	NUsedRecords uint64
+	Records      [16]Record
+	RecordStates [16]RecordState
 }
 
 // Hash represents hash.
@@ -59,11 +88,3 @@ type Hash [HashSize]byte
 
 // BlockAddress is the address (index or offset) of the block.
 type BlockAddress uint64
-
-// Pointer is a pointer to other block.
-type Pointer struct {
-	StructChecksum Hash
-	DataChecksum   Hash
-	Address        BlockAddress
-	Type           BlockType
-}
