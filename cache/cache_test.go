@@ -18,7 +18,7 @@ const (
 	cacheSize = 1024 * 1024 * 5  // 5MiB
 )
 
-func TestReadSingularityBlock(t *testing.T) {
+func TestFetchSingularityBlock(t *testing.T) {
 	requireT := require.New(t)
 
 	dev := memdev.New(devSize)
@@ -33,14 +33,14 @@ func TestReadSingularityBlock(t *testing.T) {
 	block, err := FetchBlock[types.SingularityBlock](cache, 0)
 	requireT.NoError(err)
 
-	storedChecksum := block.StructChecksum
-	block.StructChecksum = types.Hash{}
-	checksumComputed := types.Hash(sha256.Sum256(photon.NewFromValue(&block).B))
+	storedChecksum := block.Block.StructChecksum
+	block.Block.StructChecksum = types.Hash{}
+	checksumComputed := types.Hash(sha256.Sum256(photon.NewFromValue(&block.Block).B))
 
 	requireT.Equal(checksumComputed, storedChecksum)
 }
 
-func TestReadByAddress(t *testing.T) {
+func TestFetchBlockByAddress(t *testing.T) {
 	requireT := require.New(t)
 
 	const pointerIndex = 3
@@ -69,7 +69,7 @@ func TestReadByAddress(t *testing.T) {
 	block, err := FetchBlock[types.PointerBlock](cache, 1)
 	requireT.NoError(err)
 
-	requireT.Equal(types.BlockAddress(21), block.Pointers[pointerIndex].Address)
+	requireT.Equal(types.BlockAddress(21), block.Block.Pointers[pointerIndex].Address)
 
 	// Modify block directly on dev and read it from cache again to verify that cache returns unmodified cached version.
 
@@ -83,10 +83,10 @@ func TestReadByAddress(t *testing.T) {
 	block, err = FetchBlock[types.PointerBlock](cache, 1)
 	requireT.NoError(err)
 
-	requireT.Equal(types.BlockAddress(21), block.Pointers[pointerIndex].Address)
+	requireT.Equal(types.BlockAddress(21), block.Block.Pointers[pointerIndex].Address)
 }
 
-func TestWriteNewBlock(t *testing.T) {
+func TestCommitNewBlock(t *testing.T) {
 	requireT := require.New(t)
 
 	const pointerIndex = 3
@@ -107,22 +107,54 @@ func TestWriteNewBlock(t *testing.T) {
 
 	// Create new block
 
-	var newBlock types.PointerBlock
-	newBlock.Pointers[pointerIndex].Address = 21
+	newBlock := NewBlock[types.PointerBlock](cache)
+	newBlock.Block.Pointers[pointerIndex].Address = 21
 
-	address, err := NewBlock(cache, newBlock)
+	// Block is not allocated yet.
+
+	requireT.Equal(types.BlockAddress(1), cache.SingularityBlock().LastAllocatedBlock)
+	requireT.Equal(types.BlockAddress(0), newBlock.header.Address)
+	requireT.Equal(freeBlockState, newBlock.header.State)
+
+	// Address method returns error
+
+	address, err := newBlock.Address()
+	requireT.Error(err)
+	requireT.Equal(types.BlockAddress(0), address)
+
+	// Block should be allocated after committing
+
+	newBlock, err = newBlock.Commit()
+	requireT.NoError(err)
+	requireT.Equal(types.BlockAddress(2), cache.SingularityBlock().LastAllocatedBlock)
+	requireT.Equal(types.BlockAddress(2), newBlock.header.Address)
+	requireT.Equal(newBlockState, newBlock.header.State)
+
+	// Address method should work now
+
+	address, err = newBlock.Address()
 	requireT.NoError(err)
 	requireT.Equal(types.BlockAddress(2), address)
-
-	// New block should be allocated
-
-	requireT.Equal(types.BlockAddress(2), cache.SingularityBlock().LastAllocatedBlock)
 
 	// Fetching block from cache should work now
 
 	block, err := FetchBlock[types.PointerBlock](cache, 2)
 	requireT.NoError(err)
-	requireT.Equal(types.BlockAddress(21), block.Pointers[pointerIndex].Address)
+	requireT.Equal(types.BlockAddress(21), block.Block.Pointers[pointerIndex].Address)
+	requireT.Equal(types.BlockAddress(2), block.header.Address)
+	requireT.Equal(newBlockState, block.header.State)
+
+	// Update block
+
+	block.Block.Pointers[pointerIndex].Address = 22
+	block, err = block.Commit()
+	requireT.NoError(err)
+
+	// No new block should be allocated
+
+	requireT.Equal(types.BlockAddress(2), cache.SingularityBlock().LastAllocatedBlock)
+	requireT.Equal(types.BlockAddress(2), block.header.Address)
+	requireT.Equal(newBlockState, block.header.State)
 
 	// Nothing should be updated so far on dev
 
@@ -135,9 +167,9 @@ func TestWriteNewBlock(t *testing.T) {
 
 	requireT.Equal(types.BlockAddress(1), devSBlock.V.LastAllocatedBlock)
 
-	// Syncing changes
+	// Committing changes
 
-	requireT.NoError(err, cache.Sync())
+	requireT.NoError(err, cache.Commit())
 
 	// Blocks on disk should be updated
 
@@ -156,7 +188,15 @@ func TestWriteNewBlock(t *testing.T) {
 	requireT.NoError(err)
 
 	requireT.Equal(types.BlockAddress(2), devSBlock.V.LastAllocatedBlock)
-	requireT.Equal(types.BlockAddress(21), devNewBlock.V.Pointers[pointerIndex].Address)
+	requireT.Equal(types.BlockAddress(22), devNewBlock.V.Pointers[pointerIndex].Address)
+
+	// Status of the block should be `fetched`
+
+	block, err = FetchBlock[types.PointerBlock](cache, 2)
+	requireT.NoError(err)
+	requireT.Equal(types.BlockAddress(22), block.Block.Pointers[pointerIndex].Address)
+	requireT.Equal(types.BlockAddress(2), block.header.Address)
+	requireT.Equal(fetchedBlockState, block.header.State)
 
 	// Create new cache, read blocks and verify that new values are there
 
@@ -164,9 +204,20 @@ func TestWriteNewBlock(t *testing.T) {
 	requireT.NoError(err)
 
 	sBlock := cache2.SingularityBlock()
-	newBlock, err = FetchBlock[types.PointerBlock](cache2, 2)
+	block, err = FetchBlock[types.PointerBlock](cache2, 2)
 	requireT.NoError(err)
 
 	requireT.Equal(types.BlockAddress(2), sBlock.LastAllocatedBlock)
-	requireT.Equal(types.BlockAddress(21), newBlock.Pointers[pointerIndex].Address)
+	requireT.Equal(types.BlockAddress(22), block.Block.Pointers[pointerIndex].Address)
+	requireT.Equal(fetchedBlockState, block.header.State)
+	requireT.Equal(types.BlockAddress(2), block.header.Address)
+
+	// Updating fetched block should create a new one
+
+	block.Block.Pointers[pointerIndex].Address = 23
+	nextBlock, err := block.Commit()
+	requireT.NoError(err)
+	requireT.Equal(types.BlockAddress(3), cache2.SingularityBlock().LastAllocatedBlock)
+	requireT.Equal(types.BlockAddress(3), nextBlock.header.Address)
+	requireT.Equal(newBlockState, nextBlock.header.State)
 }
