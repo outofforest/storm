@@ -37,71 +37,21 @@ func (c *Cache) SingularityBlock() *types.SingularityBlock {
 	return c.singularityBlock.V
 }
 
-// FetchBlock retrieves block data from cache, if needed block is loaded from persistent source.
-func (c *Cache) FetchBlock(address types.BlockAddress) ([]byte, error) {
-	if address > c.singularityBlock.V.LastAllocatedBlock {
-		return nil, errors.Errorf("block %d does not exist", address)
-	}
-	if address == 0 {
-		return c.singularityBlock.B, nil
-	}
-
-	// TODO (wojciech): Implement open addressing
-	// TODO (wojciech): Implement cache pruning if there is no free space
-	// TODO (wojciech): Implement marking blocks in cache as deleted to prune them first if space is needed
-
+// Commit commits changes to the device.
+func (c *Cache) Commit() error {
 	for offset := int64(0); offset < c.size; offset += CachedBlockSize {
-		header := photon.NewFromBytes[Header](c.data[offset:])
-		if header.V.State == FreeBlockState {
-			if err := c.store.ReadBlock(address, c.data[offset+CacheHeaderSize:offset+CachedBlockSize]); err != nil {
-				return nil, err
-			}
-			header.V.Address = address
-			header.V.State = FetchedBlockState
-			return c.data[offset+CacheHeaderSize : offset+CachedBlockSize], nil
-		}
-		if header.V.Address == address {
-			return c.data[offset+CacheHeaderSize : offset+CachedBlockSize], nil
-		}
-	}
-
-	return nil, errors.New("cache space exhausted")
-}
-
-// NewBlock allocates and returns new block.
-func (c *Cache) NewBlock() (types.BlockAddress, []byte, error) {
-	// TODO (wojciech): Implement open addressing
-	// TODO (wojciech): Implement cache pruning if there is no free space
-	// TODO (wojciech): Implement serious free space allocation
-
-	for offset := int64(0); offset < c.size; offset += CachedBlockSize {
-		header := photon.NewFromBytes[Header](c.data[offset:])
-		if header.V.State == FreeBlockState {
-			c.singularityBlock.V.LastAllocatedBlock++
-			header.V.Address = c.singularityBlock.V.LastAllocatedBlock
-			header.V.State = NewBlockState
-			return c.singularityBlock.V.LastAllocatedBlock, c.data[offset+CacheHeaderSize : offset+CachedBlockSize], nil
-		}
-	}
-
-	return 0, nil, errors.New("cache space exhausted")
-}
-
-// Sync synchronizes changes to the dev.
-func (c *Cache) Sync() error {
-	for offset := int64(0); offset < c.size; offset += CachedBlockSize {
-		header := photon.NewFromBytes[Header](c.data[offset:])
-		if header.V.State == FreeBlockState {
+		header := photon.NewFromBytes[header](c.data[offset:])
+		if header.V.State == freeBlockState {
 			break
 		}
 
 		// TODO (wojciech): Update checksums
 
-		if header.V.State == NewBlockState {
+		if header.V.State == newBlockState {
 			if err := c.store.WriteBlock(header.V.Address, c.data[offset+CacheHeaderSize:offset+CachedBlockSize]); err != nil {
 				return err
 			}
-			header.V.State = FetchedBlockState
+			header.V.State = fetchedBlockState
 		}
 	}
 
@@ -124,24 +74,97 @@ func (c *Cache) Sync() error {
 	return nil
 }
 
-// FetchBlock returns structure representing existing block of particular type.
-func FetchBlock[T types.Block](cache *Cache, address types.BlockAddress) (T, error) {
-	content, err := cache.FetchBlock(address)
-	if err != nil {
-		var b T
-		return b, err
+func (c *Cache) fetchBlock(address types.BlockAddress) (header, []byte, error) {
+	if address > c.singularityBlock.V.LastAllocatedBlock {
+		return header{}, nil, errors.Errorf("block %d does not exist", address)
 	}
-	return *photon.NewFromBytes[T](content).V, nil
+	if address == 0 {
+		return header{}, c.singularityBlock.B, nil
+	}
+
+	// TODO (wojciech): Implement open addressing
+	// TODO (wojciech): Implement cache pruning if there is no free space
+	// TODO (wojciech): Implement marking blocks in cache as deleted to prune them first if space is needed
+
+	for offset := int64(0); offset < c.size; offset += CachedBlockSize {
+		h := photon.NewFromBytes[header](c.data[offset:])
+		if h.V.State == freeBlockState {
+			if err := c.store.ReadBlock(address, c.data[offset+CacheHeaderSize:offset+CachedBlockSize]); err != nil {
+				return header{}, nil, err
+			}
+			h.V.Address = address
+			h.V.State = fetchedBlockState
+			return *h.V, c.data[offset+CacheHeaderSize : offset+CachedBlockSize], nil
+		}
+		if h.V.Address == address {
+			return *h.V, c.data[offset+CacheHeaderSize : offset+CachedBlockSize], nil
+		}
+	}
+
+	return header{}, nil, errors.New("cache space exhausted")
+}
+
+func (c *Cache) newBlock() (header, []byte, error) {
+	// TODO (wojciech): Implement open addressing
+	// TODO (wojciech): Implement cache pruning if there is no free space
+	// TODO (wojciech): Implement serious free space allocation
+
+	for offset := int64(0); offset < c.size; offset += CachedBlockSize {
+		header := photon.NewFromBytes[header](c.data[offset:])
+		if header.V.State == freeBlockState {
+			c.singularityBlock.V.LastAllocatedBlock++
+			header.V.Address = c.singularityBlock.V.LastAllocatedBlock
+			header.V.State = newBlockState
+			return *header.V, c.data[offset+CacheHeaderSize : offset+CachedBlockSize], nil
+		}
+	}
+
+	return header{}, nil, errors.New("cache space exhausted")
+}
+
+// CachedBlock represents state of the block stored in cache.
+type CachedBlock[T types.Block] struct {
+	cache  *Cache
+	header header
+	block  photon.Union[T]
+	Block  T
+}
+
+// Commit commits block changes to cache.
+func (cb CachedBlock[T]) Commit() (CachedBlock[T], error) {
+	if cb.header.State != newBlockState {
+		header, data, err := cb.cache.newBlock()
+		if err != nil {
+			return CachedBlock[T]{}, err
+		}
+		cb.header = header
+		cb.block = photon.NewFromBytes[T](data)
+	}
+
+	*cb.block.V = cb.Block
+
+	return cb, nil
+}
+
+// FetchBlock returns structure representing existing block of particular type.
+func FetchBlock[T types.Block](cache *Cache, address types.BlockAddress) (CachedBlock[T], error) {
+	header, data, err := cache.fetchBlock(address)
+	if err != nil {
+		return CachedBlock[T]{}, err
+	}
+
+	block := photon.NewFromBytes[T](data)
+	return CachedBlock[T]{
+		cache:  cache,
+		header: header,
+		block:  block,
+		Block:  *block.V,
+	}, nil
 }
 
 // NewBlock returns structure representing new block of particular type.
-func NewBlock[T types.Block](cache *Cache, b T) (types.BlockAddress, error) {
-	address, content, err := cache.NewBlock()
-	if err != nil {
-		return 0, err
+func NewBlock[T types.Block](cache *Cache) CachedBlock[T] {
+	return CachedBlock[T]{
+		cache: cache,
 	}
-	block := photon.NewFromBytes[T](content)
-	*block.V = b
-
-	return address, nil
 }

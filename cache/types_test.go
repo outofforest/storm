@@ -8,8 +8,8 @@ import (
 )
 
 func TestHeaderSize(t *testing.T) {
-	assert.LessOrEqual(t, uint64(unsafe.Sizeof(Header{})), uint64(CacheHeaderSize))
-	assert.Greater(t, uint64(unsafe.Sizeof(Header{})), uint64(CacheHeaderSize-alignment))
+	assert.LessOrEqual(t, uint64(unsafe.Sizeof(header{})), uint64(CacheHeaderSize))
+	assert.Greater(t, uint64(unsafe.Sizeof(header{})), uint64(CacheHeaderSize-alignment))
 }
 
 func TestHeaderSizeIsAligned(t *testing.T) {
