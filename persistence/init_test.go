@@ -37,6 +37,7 @@ func TestInit(t *testing.T) {
 	requireT.NoError(err)
 
 	requireT.EqualValues(stormSubject, sBlock.V.StormID&stormSubject)
+	requireT.EqualValues(0, sBlock.V.Revision)
 	requireT.EqualValues(dev.Size()/types.BlockSize, int64(sBlock.V.NBlocks))
 	requireT.Less(dev.Size(), int64(sBlock.V.NBlocks+1)*types.BlockSize)
 	requireT.EqualValues(1, sBlock.V.LastAllocatedBlock)

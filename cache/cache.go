@@ -1,6 +1,8 @@
 package cache
 
 import (
+	"crypto/sha256"
+
 	"github.com/outofforest/photon"
 	"github.com/pkg/errors"
 
@@ -32,7 +34,7 @@ func New(store *persistence.Store, size int64) (*Cache, error) {
 	}, nil
 }
 
-// SingularityBlock returns modifiable singularity block.
+// SingularityBlock returns current singularity block.
 func (c *Cache) SingularityBlock() *types.SingularityBlock {
 	return c.singularityBlock.V
 }
@@ -59,8 +61,11 @@ func (c *Cache) Commit() error {
 		return err
 	}
 
-	// TODO (wojciech): Write many copies of the singularity block
+	// TODO (wojciech): Write each new version to rotating location
 
+	c.singularityBlock.V.Revision++
+	c.singularityBlock.V.StructChecksum = types.Hash{}
+	c.singularityBlock.V.StructChecksum = sha256.Sum256(c.singularityBlock.B)
 	if err := c.store.WriteBlock(0, c.singularityBlock.B); err != nil {
 		return err
 	}
@@ -69,7 +74,7 @@ func (c *Cache) Commit() error {
 		return err
 	}
 
-	// TODO (wojciech): Verify that singularity block is ok by rading it using O_DIRECT option
+	// TODO (wojciech): Verify that singularity block is ok by reading it using O_DIRECT option
 
 	return nil
 }
