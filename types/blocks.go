@@ -13,6 +13,12 @@ const (
 
 	// PointersPerBlock is the number of pointers in each pointer block.
 	PointersPerBlock = 64
+
+	// PointersPerBlockShift is set to number of bits used by PointersPerBlock.
+	PointersPerBlockShift = 6
+
+	// RecordsPerBlock is the number of records in each data block.
+	RecordsPerBlock = 16
 )
 
 // BlockType is the enum representing the block type.
@@ -38,6 +44,7 @@ type BlockBytes [BlockSize]byte
 type SingularityBlock struct {
 	StructChecksum Hash
 	StormID        uint64
+	Revision       uint64
 	NBlocks        uint64
 
 	// TODO (wojciech): Replace with correct (de)allocation mechanism
@@ -79,8 +86,9 @@ type Record struct {
 // DataBlock contains key-value pairs.
 type DataBlock struct {
 	NUsedRecords uint64
-	Records      [16]Record
-	RecordStates [16]RecordState
+	Records      [RecordsPerBlock]Record
+	RecordHashes [RecordsPerBlock]uint64
+	RecordStates [RecordsPerBlock]RecordState
 }
 
 // Hash represents hash.

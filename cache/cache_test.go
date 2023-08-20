@@ -54,7 +54,7 @@ func TestFetchBlockByAddress(t *testing.T) {
 	cache, err := New(store, cacheSize)
 	requireT.NoError(err)
 
-	cache.SingularityBlock().LastAllocatedBlock++
+	cache.singularityBlock.V.LastAllocatedBlock++
 
 	// Set new block directly on dev and read it from cache to test that data are correctly loaded to it.
 
@@ -112,7 +112,7 @@ func TestCommitNewBlock(t *testing.T) {
 
 	// Block is not allocated yet.
 
-	requireT.Equal(types.BlockAddress(1), cache.SingularityBlock().LastAllocatedBlock)
+	requireT.Equal(types.BlockAddress(1), cache.singularityBlock.V.LastAllocatedBlock)
 	requireT.Equal(types.BlockAddress(0), newBlock.header.Address)
 	requireT.Equal(freeBlockState, newBlock.header.State)
 
@@ -126,7 +126,7 @@ func TestCommitNewBlock(t *testing.T) {
 
 	newBlock, err = newBlock.Commit()
 	requireT.NoError(err)
-	requireT.Equal(types.BlockAddress(2), cache.SingularityBlock().LastAllocatedBlock)
+	requireT.Equal(types.BlockAddress(2), cache.singularityBlock.V.LastAllocatedBlock)
 	requireT.Equal(types.BlockAddress(2), newBlock.header.Address)
 	requireT.Equal(newBlockState, newBlock.header.State)
 
@@ -152,7 +152,7 @@ func TestCommitNewBlock(t *testing.T) {
 
 	// No new block should be allocated
 
-	requireT.Equal(types.BlockAddress(2), cache.SingularityBlock().LastAllocatedBlock)
+	requireT.Equal(types.BlockAddress(2), cache.singularityBlock.V.LastAllocatedBlock)
 	requireT.Equal(types.BlockAddress(2), block.header.Address)
 	requireT.Equal(newBlockState, block.header.State)
 
@@ -203,11 +203,10 @@ func TestCommitNewBlock(t *testing.T) {
 	cache2, err := New(store, cacheSize)
 	requireT.NoError(err)
 
-	sBlock := cache2.SingularityBlock()
 	block, err = FetchBlock[types.PointerBlock](cache2, 2)
 	requireT.NoError(err)
 
-	requireT.Equal(types.BlockAddress(2), sBlock.LastAllocatedBlock)
+	requireT.Equal(types.BlockAddress(2), cache2.singularityBlock.V.LastAllocatedBlock)
 	requireT.Equal(types.BlockAddress(22), block.Block.Pointers[pointerIndex].Address)
 	requireT.Equal(fetchedBlockState, block.header.State)
 	requireT.Equal(types.BlockAddress(2), block.header.Address)
@@ -217,7 +216,7 @@ func TestCommitNewBlock(t *testing.T) {
 	block.Block.Pointers[pointerIndex].Address = 23
 	nextBlock, err := block.Commit()
 	requireT.NoError(err)
-	requireT.Equal(types.BlockAddress(3), cache2.SingularityBlock().LastAllocatedBlock)
+	requireT.Equal(types.BlockAddress(3), cache2.singularityBlock.V.LastAllocatedBlock)
 	requireT.Equal(types.BlockAddress(3), nextBlock.header.Address)
 	requireT.Equal(newBlockState, nextBlock.header.State)
 }
