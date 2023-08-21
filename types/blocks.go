@@ -2,6 +2,9 @@ package types
 
 import (
 	"crypto/sha256"
+
+	"github.com/outofforest/photon"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -35,6 +38,7 @@ const (
 // Block defines the constraint for generics using block types.
 type Block interface {
 	SingularityBlock | PointerBlock | DataBlock
+	ComputeChecksums() (Hash, Hash, error)
 }
 
 // BlockBytes represents the raw data bytes of the block.
@@ -53,6 +57,12 @@ type SingularityBlock struct {
 	RootDataBlockType BlockType
 }
 
+// ComputeChecksums computes struct checksum of the block.
+func (sb SingularityBlock) ComputeChecksums() (Hash, Hash, error) {
+	sb.StructChecksum = Hash{}
+	return sha256.Sum256(photon.NewFromValue(&sb).B), Hash{}, nil
+}
+
 // Pointer is a pointer to other block.
 type Pointer struct {
 	StructChecksum Hash
@@ -65,6 +75,20 @@ type PointerBlock struct {
 	NUsedPointers     uint64
 	Pointers          [PointersPerBlock]Pointer
 	PointedBlockTypes [PointersPerBlock]BlockType
+}
+
+// ComputeChecksums computes struct and data checksums of the block.
+func (pb PointerBlock) ComputeChecksums() (Hash, Hash, error) {
+	hash := sha256.New()
+	for i, state := range pb.PointedBlockTypes {
+		if state != FreeBlockType {
+			_, err := hash.Write(pb.Pointers[i].DataChecksum[:])
+			if err != nil {
+				return Hash{}, Hash{}, errors.WithStack(err)
+			}
+		}
+	}
+	return sha256.Sum256(photon.NewFromValue(&pb).B), Hash(hash.Sum(nil)), nil
 }
 
 // TODO (wojciech): Currently data blocks store only a fixed set of key-value pairs with their types being strict.
@@ -81,7 +105,7 @@ const (
 // Record stores the key-value pair
 type Record struct {
 	Key   [32]byte
-	Value uint64
+	Value [32]byte
 }
 
 // DataBlock contains key-value pairs.
@@ -90,6 +114,24 @@ type DataBlock struct {
 	Records      [RecordsPerBlock]Record
 	RecordHashes [RecordsPerBlock]uint64
 	RecordStates [RecordsPerBlock]RecordState
+}
+
+// ComputeChecksums computes struct and data checksums of the block.
+func (db DataBlock) ComputeChecksums() (Hash, Hash, error) {
+	hash := sha256.New()
+	for i, state := range db.RecordStates {
+		if state != FreeRecordState {
+			_, err := hash.Write(db.Records[i].Key[:])
+			if err != nil {
+				return Hash{}, Hash{}, errors.WithStack(err)
+			}
+			_, err = hash.Write(db.Records[i].Value[:])
+			if err != nil {
+				return Hash{}, Hash{}, errors.WithStack(err)
+			}
+		}
+	}
+	return sha256.Sum256(photon.NewFromValue(&db).B), Hash(hash.Sum(nil)), nil
 }
 
 // Hash represents hash.

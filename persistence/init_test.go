@@ -2,7 +2,6 @@ package persistence
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"io"
 	"testing"
 
@@ -37,11 +36,10 @@ func TestInit(t *testing.T) {
 	requireT.EqualValues(0, sBlock.V.RootData.Address)
 	requireT.EqualValues(types.FreeBlockType, sBlock.V.RootDataBlockType)
 
-	checksum := sBlock.V.StructChecksum
-	sBlock.V.StructChecksum = types.Hash{}
-	checksumExpected := types.Hash(sha256.Sum256(sBlock.B))
+	checksum, _, err := sBlock.V.ComputeChecksums()
+	requireT.NoError(err)
 
-	requireT.Equal(checksumExpected, checksum)
+	requireT.Equal(checksum, sBlock.V.StructChecksum)
 }
 
 func TestOverwrite(t *testing.T) {
@@ -98,19 +96,28 @@ func TestPointerBlockDataChecksum(t *testing.T) {
 	finalDataHash := types.Hash{0xf8, 0x18, 0xaf, 0xd3, 0x7a, 0x6d, 0xc3, 0xbc, 0x92, 0xfb, 0x44, 0x73, 0x10, 0x11, 0x27, 0x70, 0x6, 0xdb, 0x4e, 0xfa, 0x6e, 0x90, 0x23, 0xcd, 0x74, 0x68, 0xc0, 0x23, 0x35, 0xd2, 0x2a, 0x4d}
 
 	pBlock := &types.PointerBlock{}
-	assertT.Equal(emptyDataHash, pointerBlockDataChecksum(pBlock))
+	_, dataChecksum, err := pBlock.ComputeChecksums()
+	assertT.NoError(err)
+	assertT.Equal(emptyDataHash, dataChecksum)
 
 	// Only allocated pointers are taken into account
 
 	pBlock.Pointers[0].DataChecksum = types.Hash(bytes.Repeat([]byte{0x01}, types.HashSize))
 	pBlock.Pointers[1].DataChecksum = types.Hash(bytes.Repeat([]byte{0x02}, types.HashSize))
-	assertT.Equal(emptyDataHash, pointerBlockDataChecksum(pBlock))
+	_, dataChecksum, err = pBlock.ComputeChecksums()
+	assertT.NoError(err)
+	assertT.Equal(emptyDataHash, dataChecksum)
 
 	pBlock.PointedBlockTypes[0] = types.LeafBlockType
-	assertT.Equal(types.Hash{0x72, 0xcd, 0x6e, 0x84, 0x22, 0xc4, 0x7, 0xfb, 0x6d, 0x9, 0x86, 0x90, 0xf1, 0x13, 0xb, 0x7d, 0xed, 0x7e, 0xc2, 0xf7, 0xf5, 0xe1, 0xd3, 0xb, 0xd9, 0xd5, 0x21, 0xf0, 0x15, 0x36, 0x37, 0x93}, pointerBlockDataChecksum(pBlock))
+	_, dataChecksum, err = pBlock.ComputeChecksums()
+	assertT.NoError(err)
+	assertT.Equal(types.Hash{0x72, 0xcd, 0x6e, 0x84, 0x22, 0xc4, 0x7, 0xfb, 0x6d, 0x9, 0x86, 0x90, 0xf1, 0x13, 0xb, 0x7d, 0xed, 0x7e, 0xc2, 0xf7, 0xf5, 0xe1, 0xd3, 0xb, 0xd9, 0xd5, 0x21, 0xf0, 0x15, 0x36, 0x37, 0x93},
+		dataChecksum)
 
 	pBlock.PointedBlockTypes[1] = types.LeafBlockType
-	assertT.Equal(finalDataHash, pointerBlockDataChecksum(pBlock))
+	_, dataChecksum, err = pBlock.ComputeChecksums()
+	assertT.NoError(err)
+	assertT.Equal(finalDataHash, dataChecksum)
 
 	// Other fields don't matter
 
@@ -119,5 +126,7 @@ func TestPointerBlockDataChecksum(t *testing.T) {
 	pBlock.Pointers[0].StructChecksum = types.Hash(bytes.Repeat([]byte{0x03}, types.HashSize))
 	pBlock.Pointers[1].Address = 2
 	pBlock.Pointers[2].StructChecksum = types.Hash(bytes.Repeat([]byte{0x04}, types.HashSize))
-	assertT.Equal(finalDataHash, pointerBlockDataChecksum(pBlock))
+	_, dataChecksum, err = pBlock.ComputeChecksums()
+	assertT.NoError(err)
+	assertT.Equal(finalDataHash, dataChecksum)
 }

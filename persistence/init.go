@@ -1,7 +1,6 @@
 package persistence
 
 import (
-	"crypto/sha256"
 	"io"
 	"math/rand"
 
@@ -42,7 +41,11 @@ func Initialize(dev Dev, overwrite bool) error {
 		NBlocks:            uint64(dev.Size() / types.BlockSize),
 		LastAllocatedBlock: 1,
 	})
-	sBlock.V.StructChecksum = sha256.Sum256(sBlock.B)
+	checksum, _, err := sBlock.V.ComputeChecksums()
+	if err != nil {
+		return err
+	}
+	sBlock.V.StructChecksum = checksum
 
 	if _, err := dev.Seek(0, io.SeekStart); err != nil {
 		return errors.WithStack(err)
@@ -91,16 +94,4 @@ func loadSingularityBlock(dev Dev) (photon.Union[types.SingularityBlock], error)
 	}
 
 	return sBlock, nil
-}
-
-func pointerBlockDataChecksum(pBlock *types.PointerBlock) types.Hash {
-	hasher := sha256.New()
-
-	for i, state := range pBlock.PointedBlockTypes {
-		if state != types.FreeBlockType {
-			hasher.Write(pBlock.Pointers[i].DataChecksum[:])
-		}
-	}
-
-	return types.Hash(hasher.Sum(nil))
 }

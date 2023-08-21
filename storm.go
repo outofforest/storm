@@ -29,34 +29,34 @@ func New(dev persistence.Dev, cacheSize int64) (*Storm, error) {
 }
 
 // Get gets value for a key from the store.
-func (s *Storm) Get(key [32]byte) (uint64, bool, error) {
+func (s *Storm) Get(key [32]byte) ([32]byte, bool, error) {
 	sBlock := s.c.SingularityBlock()
 	dataBlockPath, exists, err := lookupByKey[types.DataBlock](s.c, &sBlock.RootData, &sBlock.RootDataBlockType, false, key)
 	if !exists || err != nil {
-		return 0, false, err
+		return [32]byte{}, false, err
 	}
 
 	dataBlock := dataBlockPath.Leaf.Block
 
 	if dataBlock.RecordStates[0] == types.FreeRecordState {
-		return 0, false, nil
+		return [32]byte{}, false, nil
 	}
 
 	if hash := xxhash.Sum64(key[:]); dataBlock.RecordHashes[0] != hash {
-		return 0, false, nil
+		return [32]byte{}, false, nil
 	}
 
 	record := dataBlock.Records[0]
 
 	if record.Key != key {
-		return 0, false, nil
+		return [32]byte{}, false, nil
 	}
 
 	return record.Value, true, nil
 }
 
 // Set sets value for a key in the store.
-func (s *Storm) Set(key [32]byte, value uint64) error {
+func (s *Storm) Set(key [32]byte, value [32]byte) error {
 	// TODO (wojciech): Implement block splitting
 
 	sBlock := s.c.SingularityBlock()
@@ -168,6 +168,10 @@ func (kp keyPath[T]) Commit() (cache.CachedBlock[T], error) {
 	if err != nil {
 		return cache.CachedBlock[T]{}, err
 	}
+	structCheksum, dataChecksum, err := leaf.Block.ComputeChecksums()
+	if err != nil {
+		return cache.CachedBlock[T]{}, err
+	}
 
 	if nHops := len(kp.hops); nHops > 0 {
 		lastHop := kp.hops[nHops-1]
@@ -178,14 +182,19 @@ func (kp keyPath[T]) Commit() (cache.CachedBlock[T], error) {
 		for i := nHops - 1; i >= 0; i-- {
 			hop := kp.hops[i]
 			hop.Block.Block.Pointers[hop.Index] = types.Pointer{
-				Address: address,
-				// TODO (wojciech): Set checksums
+				Address:        address,
+				StructChecksum: structCheksum,
+				DataChecksum:   dataChecksum,
 			}
 			pointerBlock, err := hop.Block.Commit()
 			if err != nil {
 				return cache.CachedBlock[T]{}, err
 			}
 			address, err = pointerBlock.Address()
+			if err != nil {
+				return cache.CachedBlock[T]{}, err
+			}
+			structCheksum, dataChecksum, err = leaf.Block.ComputeChecksums()
 			if err != nil {
 				return cache.CachedBlock[T]{}, err
 			}
@@ -196,8 +205,9 @@ func (kp keyPath[T]) Commit() (cache.CachedBlock[T], error) {
 		*kp.rootBlockType = types.LeafBlockType
 	}
 	*kp.rootPointer = types.Pointer{
-		Address: address,
-		// TODO (wojciech): Set checksums
+		StructChecksum: structCheksum,
+		DataChecksum:   dataChecksum,
+		Address:        address,
 	}
 
 	return leaf, nil
