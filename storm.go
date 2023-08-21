@@ -10,7 +10,7 @@ import (
 
 // Storm represents the storm storage engine.
 type Storm struct {
-	cache *cache.Cache
+	c *cache.Cache
 }
 
 // New returns new storm store.
@@ -19,61 +19,34 @@ func New(dev persistence.Dev, cacheSize int64) (*Storm, error) {
 	if err != nil {
 		return nil, err
 	}
-	cache, err := cache.New(store, cacheSize)
+	c, err := cache.New(store, cacheSize)
 	if err != nil {
 		return nil, err
 	}
 	return &Storm{
-		cache: cache,
+		c: c,
 	}, nil
 }
 
 // Get gets value for a key from the store.
 func (s *Storm) Get(key [32]byte) (uint64, bool, error) {
-	nextAddress := s.cache.SingularityBlock().RootData.Address
-
-	hash := xxhash.Sum64(key[:])
-	hopAddressing := hash
-
-	var dataBlock cache.CachedBlock[types.DataBlock]
-	var pointerBlock cache.CachedBlock[types.PointerBlock]
-	var pointerIndex uint64
-
-dataBlockLoop:
-	for {
-		var err error
-		pointerBlock, err = cache.FetchBlock[types.PointerBlock](s.cache, nextAddress)
-		if err != nil {
-			return 0, false, err
-		}
-
-		pointerIndex = hash & (types.PointersPerBlock - 1)
-		hopAddressing >>= types.PointersPerBlockShift
-
-		switch pointerBlock.Block.PointedBlockTypes[pointerIndex] {
-		case types.FreeBlockType:
-			return 0, false, nil
-		case types.DataBlockType:
-			var err error
-			dataBlock, err = cache.FetchBlock[types.DataBlock](s.cache, pointerBlock.Block.Pointers[pointerIndex].Address)
-			if err != nil {
-				return 0, false, err
-			}
-			break dataBlockLoop
-		case types.PointerBlockType:
-			nextAddress = pointerBlock.Block.Pointers[pointerIndex].Address
-		}
+	sBlock := s.c.SingularityBlock()
+	dataBlockPath, exists, err := lookupByKey[types.DataBlock](s.c, &sBlock.RootData, &sBlock.RootDataBlockType, false, key)
+	if !exists || err != nil {
+		return 0, false, err
 	}
 
-	if dataBlock.Block.RecordStates[0] == types.FreeRecordState {
+	dataBlock := dataBlockPath.Leaf.Block
+
+	if dataBlock.RecordStates[0] == types.FreeRecordState {
 		return 0, false, nil
 	}
 
-	if dataBlock.Block.RecordHashes[0] != hash {
+	if hash := xxhash.Sum64(key[:]); dataBlock.RecordHashes[0] != hash {
 		return 0, false, nil
 	}
 
-	record := dataBlock.Block.Records[0]
+	record := dataBlock.Records[0]
 
 	if record.Key != key {
 		return 0, false, nil
@@ -82,110 +55,28 @@ dataBlockLoop:
 	return record.Value, true, nil
 }
 
-type hop struct {
-	Block cache.CachedBlock[types.PointerBlock]
-	Index uint64
-}
-
 // Set sets value for a key in the store.
 func (s *Storm) Set(key [32]byte, value uint64) error {
-	sBlock := s.cache.SingularityBlock()
-	nextAddress := sBlock.RootData.Address
+	// TODO (wojciech): Implement block splitting
 
-	hash := xxhash.Sum64(key[:])
-	hopAddressing := hash
-
-	var dataBlock cache.CachedBlock[types.DataBlock]
-	var pointerBlock cache.CachedBlock[types.PointerBlock]
-	var pointerIndex uint64
-	hops := make([]hop, 0, 11)
-
-dataBlockLoop:
-	for {
-		var err error
-		pointerBlock, err = cache.FetchBlock[types.PointerBlock](s.cache, nextAddress)
-		if err != nil {
-			return err
-		}
-
-		pointerIndex = hash & (types.PointersPerBlock - 1)
-		hopAddressing >>= types.PointersPerBlockShift
-
-		switch pointerBlock.Block.PointedBlockTypes[pointerIndex] {
-		case types.FreeBlockType:
-			dataBlock = cache.NewBlock[types.DataBlock](s.cache)
-			pointerBlock.Block.NUsedPointers++
-			pointerBlock.Block.PointedBlockTypes[pointerIndex] = types.DataBlockType
-			break dataBlockLoop
-		case types.DataBlockType:
-			var err error
-			dataBlock, err = cache.FetchBlock[types.DataBlock](s.cache, pointerBlock.Block.Pointers[pointerIndex].Address)
-			if err != nil {
-				return err
-			}
-			break dataBlockLoop
-		case types.PointerBlockType:
-			hops = append(hops, hop{
-				Block: pointerBlock,
-				Index: pointerIndex,
-			})
-			nextAddress = pointerBlock.Block.Pointers[pointerIndex].Address
-		}
+	sBlock := s.c.SingularityBlock()
+	dataBlockPath, _, err := lookupByKey[types.DataBlock](s.c, &sBlock.RootData, &sBlock.RootDataBlockType, true, key)
+	if err != nil {
+		return err
 	}
 
 	// TODO (wojciech): Find correct record index
 
-	dataBlock.Block.NUsedRecords = 1
-	dataBlock.Block.RecordStates[0] = types.DefinedRecordState
-	dataBlock.Block.RecordHashes[0] = hash
-	dataBlock.Block.Records[0] = types.Record{
+	dataBlockPath.Leaf.Block.NUsedRecords = 1
+	dataBlockPath.Leaf.Block.RecordStates[0] = types.DefinedRecordState
+	dataBlockPath.Leaf.Block.RecordHashes[0] = xxhash.Sum64(key[:])
+	dataBlockPath.Leaf.Block.Records[0] = types.Record{
 		Key:   key,
 		Value: value,
 	}
 
-	var err error
-	dataBlock, err = dataBlock.Commit()
-	if err != nil {
-		return err
-	}
-	dataBlockAddress, err := dataBlock.Address()
-	if err != nil {
-		return err
-	}
-
-	pointerBlock.Block.Pointers[pointerIndex] = types.Pointer{
-		Address: dataBlockAddress,
-		// TODO (wojciech): Set checksums
-	}
-	pointerBlock, err = pointerBlock.Commit()
-	if err != nil {
-		return err
-	}
-	address, err := pointerBlock.Address()
-	if err != nil {
-		return err
-	}
-
-	for i := len(hops) - 1; i >= 0; i-- {
-		hop := hops[i]
-		hop.Block.Block.Pointers[hop.Index] = types.Pointer{
-			Address: address,
-			// TODO (wojciech): Set checksums
-		}
-		pointerBlock, err = hop.Block.Commit()
-		if err != nil {
-			return err
-		}
-		address, err = pointerBlock.Address()
-		if err != nil {
-			return err
-		}
-	}
-
-	sBlock.RootData.Address = address
-	// TODO (wojciech): Set checksums
-
-	return nil
+	_, err = dataBlockPath.Commit()
+	return err
 }
 
 // Delete deletes key from the store.
@@ -196,5 +87,118 @@ func (s *Storm) Delete(key [32]byte) error {
 
 // Commit commits cached changes to the device.
 func (s *Storm) Commit() error {
-	return s.cache.Commit()
+	return s.c.Commit()
+}
+
+type hop struct {
+	Index uint64
+	Block cache.CachedBlock[types.PointerBlock]
+}
+
+type keyPath[T types.Block] struct {
+	rootPointer   *types.Pointer
+	rootBlockType *types.BlockType
+	hops          []hop
+	Leaf          cache.CachedBlock[T]
+}
+
+func lookupByKey[T types.Block](
+	c *cache.Cache,
+	rootPointer *types.Pointer,
+	rootBlockType *types.BlockType,
+	createIfMissing bool,
+	key [32]byte,
+) (keyPath[T], bool, error) {
+	currentPointer := *rootPointer
+	currentPointedBlockType := *rootBlockType
+
+	hash := xxhash.Sum64(key[:])
+	hopAddressing := hash
+	hops := make([]hop, 0, 11)
+
+	for {
+		switch currentPointedBlockType {
+		case types.FreeBlockType:
+			if createIfMissing {
+				return keyPath[T]{
+					rootPointer:   rootPointer,
+					rootBlockType: rootBlockType,
+					hops:          hops,
+					Leaf:          cache.NewBlock[T](c),
+				}, true, nil
+			}
+			return keyPath[T]{}, false, nil
+		case types.LeafBlockType:
+			leafBlock, err := cache.FetchBlock[T](c, currentPointer.Address)
+			if err != nil {
+				return keyPath[T]{}, false, err
+			}
+			return keyPath[T]{
+				rootPointer:   rootPointer,
+				rootBlockType: rootBlockType,
+				hops:          hops,
+				Leaf:          leafBlock,
+			}, true, nil
+		case types.PointerBlockType:
+			pointerBlock, err := cache.FetchBlock[types.PointerBlock](c, currentPointer.Address)
+			if err != nil {
+				return keyPath[T]{}, false, err
+			}
+
+			pointerIndex := hopAddressing & (types.PointersPerBlock - 1)
+			hopAddressing >>= types.PointersPerBlockShift
+
+			currentPointedBlockType = pointerBlock.Block.PointedBlockTypes[pointerIndex]
+			currentPointer = pointerBlock.Block.Pointers[pointerIndex]
+
+			hops = append(hops, hop{
+				Block: pointerBlock,
+				Index: pointerIndex,
+			})
+		}
+	}
+}
+
+func (kp keyPath[T]) Commit() (cache.CachedBlock[T], error) {
+	leaf, err := kp.Leaf.Commit()
+	if err != nil {
+		return cache.CachedBlock[T]{}, err
+	}
+	address, err := leaf.Address()
+	if err != nil {
+		return cache.CachedBlock[T]{}, err
+	}
+
+	if nHops := len(kp.hops); nHops > 0 {
+		lastHop := kp.hops[nHops-1]
+		if lastHop.Block.Block.PointedBlockTypes[lastHop.Index] == types.FreeBlockType {
+			lastHop.Block.Block.NUsedPointers++
+			lastHop.Block.Block.PointedBlockTypes[lastHop.Index] = types.LeafBlockType
+		}
+		for i := nHops - 1; i >= 0; i-- {
+			hop := kp.hops[i]
+			hop.Block.Block.Pointers[hop.Index] = types.Pointer{
+				Address: address,
+				// TODO (wojciech): Set checksums
+			}
+			pointerBlock, err := hop.Block.Commit()
+			if err != nil {
+				return cache.CachedBlock[T]{}, err
+			}
+			address, err = pointerBlock.Address()
+			if err != nil {
+				return cache.CachedBlock[T]{}, err
+			}
+		}
+	}
+
+	if *kp.rootBlockType == types.FreeBlockType {
+		*kp.rootBlockType = types.LeafBlockType
+	}
+	*kp.rootPointer = types.Pointer{
+		Address: address,
+		// TODO (wojciech): Set checksums
+	}
+
+	return leaf, nil
 }
