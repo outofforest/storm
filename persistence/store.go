@@ -7,7 +7,8 @@ import (
 	"github.com/outofforest/photon"
 	"github.com/pkg/errors"
 
-	"github.com/outofforest/storm/types"
+	"github.com/outofforest/storm/blocks"
+	singularityV0 "github.com/outofforest/storm/blocks/singularity/v0"
 )
 
 // Store represents persistent storage.
@@ -31,12 +32,12 @@ func OpenStore(dev Dev) (*Store, error) {
 }
 
 // ReadBlock reads raw block bytes from the addressed block.
-func (s *Store) ReadBlock(address types.BlockAddress, p []byte) error {
-	if len(p) == 0 || int64(len(p)) > types.BlockSize {
+func (s *Store) ReadBlock(address blocks.BlockAddress, p []byte) error {
+	if len(p) == 0 || int64(len(p)) > blocks.BlockSize {
 		return errors.Errorf("invalid size of output buffer: %d", len(p))
 	}
 
-	if _, err := s.dev.Seek(int64(address)*types.BlockSize, io.SeekStart); err != nil {
+	if _, err := s.dev.Seek(int64(address)*blocks.BlockSize, io.SeekStart); err != nil {
 		return errors.WithStack(err)
 	}
 	if _, err := s.dev.Read(p); err != nil {
@@ -46,12 +47,12 @@ func (s *Store) ReadBlock(address types.BlockAddress, p []byte) error {
 }
 
 // WriteBlock writes raw block bytes to the addressed block.
-func (s *Store) WriteBlock(address types.BlockAddress, p []byte) error {
-	if len(p) == 0 || int64(len(p)) > types.BlockSize {
+func (s *Store) WriteBlock(address blocks.BlockAddress, p []byte) error {
+	if len(p) == 0 || int64(len(p)) > blocks.BlockSize {
 		return errors.Errorf("invalid size of input buffer: %d", len(p))
 	}
 
-	if _, err := s.dev.Seek(int64(address)*types.BlockSize, io.SeekStart); err != nil {
+	if _, err := s.dev.Seek(int64(address)*blocks.BlockSize, io.SeekStart); err != nil {
 		return errors.WithStack(err)
 	}
 	if _, err := s.dev.Write(p); err != nil {
@@ -65,7 +66,7 @@ func (s *Store) Sync() error {
 	return errors.WithStack(s.dev.Sync())
 }
 
-func validateSingularityBlock(sBlock photon.Union[types.SingularityBlock]) error {
+func validateSingularityBlock(sBlock photon.Union[singularityV0.Block]) error {
 	if sBlock.V.StormID&stormSubject != stormSubject {
 		return errors.New("device does not contain storm storage system")
 	}

@@ -7,7 +7,8 @@ import (
 	"github.com/outofforest/photon"
 	"github.com/pkg/errors"
 
-	"github.com/outofforest/storm/types"
+	"github.com/outofforest/storm/blocks"
+	singularityV0 "github.com/outofforest/storm/blocks/singularity/v0"
 )
 
 const (
@@ -36,9 +37,10 @@ func Initialize(dev Dev, overwrite bool) error {
 		return err
 	}
 
-	sBlock := photon.NewFromValue(&types.SingularityBlock{
+	sBlock := photon.NewFromValue(&singularityV0.Block{
+		SchemaVersion:      blocks.SingularityV0,
 		StormID:            rand.Uint64() | stormSubject,
-		NBlocks:            uint64(dev.Size() / types.BlockSize),
+		NBlocks:            uint64(dev.Size() / blocks.BlockSize),
 		LastAllocatedBlock: 1,
 	})
 	checksum, _, err := sBlock.V.ComputeChecksums()
@@ -55,7 +57,7 @@ func Initialize(dev Dev, overwrite bool) error {
 		return errors.WithStack(err)
 	}
 
-	if _, err := dev.Seek(types.BlockSize, io.SeekStart); err != nil {
+	if _, err := dev.Seek(blocks.BlockSize, io.SeekStart); err != nil {
 		return errors.WithStack(err)
 	}
 
@@ -65,10 +67,10 @@ func Initialize(dev Dev, overwrite bool) error {
 
 func validateDev(dev Dev, overwrite bool) error {
 	size := dev.Size()
-	nBlocks := uint64(size / types.BlockSize)
+	nBlocks := uint64(size / blocks.BlockSize)
 
 	if nBlocks < minNBlocks {
-		return errors.Errorf("device is too small, minimum size is: %d bytes, provided: %d", minNBlocks*types.BlockSize, size)
+		return errors.Errorf("device is too small, minimum size is: %d bytes, provided: %d", minNBlocks*blocks.BlockSize, size)
 	}
 
 	sBlock, err := loadSingularityBlock(dev)
@@ -83,14 +85,14 @@ func validateDev(dev Dev, overwrite bool) error {
 	return nil
 }
 
-func loadSingularityBlock(dev Dev) (photon.Union[types.SingularityBlock], error) {
+func loadSingularityBlock(dev Dev) (photon.Union[singularityV0.Block], error) {
 	if _, err := dev.Seek(0, io.SeekStart); err != nil {
-		return photon.Union[types.SingularityBlock]{}, errors.WithStack(err)
+		return photon.Union[singularityV0.Block]{}, errors.WithStack(err)
 	}
 
-	sBlock := photon.NewFromBytes[types.SingularityBlock](make([]byte, types.BlockSize))
+	sBlock := photon.NewFromBytes[singularityV0.Block](make([]byte, blocks.BlockSize))
 	if _, err := dev.Read(sBlock.B); err != nil {
-		return photon.Union[types.SingularityBlock]{}, errors.WithStack(err)
+		return photon.Union[singularityV0.Block]{}, errors.WithStack(err)
 	}
 
 	return sBlock, nil

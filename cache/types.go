@@ -3,7 +3,7 @@ package cache
 import (
 	"unsafe"
 
-	"github.com/outofforest/storm/types"
+	"github.com/outofforest/storm/blocks"
 )
 
 const (
@@ -16,7 +16,7 @@ const (
 	CacheHeaderSize = (int64(unsafe.Sizeof(header{})-1)/alignment + 1) * alignment
 
 	// CachedBlockSize is the size of the cached block stored in memory.
-	CachedBlockSize = types.BlockSize + CacheHeaderSize
+	CachedBlockSize = blocks.BlockSize + CacheHeaderSize
 )
 
 // blockState is the enum representing the state of the block.
@@ -31,6 +31,6 @@ const (
 
 // header stores the metadata of cached block.
 type header struct {
-	Address types.BlockAddress
+	Address blocks.BlockAddress
 	State   blockState
 }

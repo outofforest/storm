@@ -4,8 +4,10 @@ import (
 	"github.com/outofforest/photon"
 	"github.com/pkg/errors"
 
+	"github.com/outofforest/storm/blocks"
+	"github.com/outofforest/storm/blocks/constraint"
+	singularityV0 "github.com/outofforest/storm/blocks/singularity/v0"
 	"github.com/outofforest/storm/persistence"
-	"github.com/outofforest/storm/types"
 )
 
 // Cache caches blocks.
@@ -14,12 +16,12 @@ type Cache struct {
 	size  int64
 	data  []byte
 
-	singularityBlock photon.Union[types.SingularityBlock]
+	singularityBlock photon.Union[singularityV0.Block]
 }
 
 // New creates new cache.
 func New(store *persistence.Store, size int64) (*Cache, error) {
-	sBlock := photon.NewFromValue(&types.SingularityBlock{})
+	sBlock := photon.NewFromValue(&singularityV0.Block{})
 	if err := store.ReadBlock(0, sBlock.B); err != nil {
 		return nil, err
 	}
@@ -33,7 +35,7 @@ func New(store *persistence.Store, size int64) (*Cache, error) {
 }
 
 // SingularityBlock returns current singularity block.
-func (c *Cache) SingularityBlock() *types.SingularityBlock {
+func (c *Cache) SingularityBlock() *singularityV0.Block {
 	return c.singularityBlock.V
 }
 
@@ -80,7 +82,7 @@ func (c *Cache) Commit() error {
 	return nil
 }
 
-func (c *Cache) fetchBlock(address types.BlockAddress) (header, []byte, error) {
+func (c *Cache) fetchBlock(address blocks.BlockAddress) (header, []byte, error) {
 	if address > c.singularityBlock.V.LastAllocatedBlock {
 		return header{}, nil, errors.Errorf("block %d does not exist", address)
 	}
@@ -129,7 +131,7 @@ func (c *Cache) newBlock() (header, []byte, error) {
 }
 
 // CachedBlock represents state of the block stored in cache.
-type CachedBlock[T types.Block] struct {
+type CachedBlock[T constraint.Block] struct {
 	cache  *Cache
 	header header
 	block  photon.Union[T]
@@ -137,7 +139,7 @@ type CachedBlock[T types.Block] struct {
 }
 
 // Address returns addrress of the block.
-func (cb CachedBlock[T]) Address() (types.BlockAddress, error) {
+func (cb CachedBlock[T]) Address() (blocks.BlockAddress, error) {
 	if cb.header.State == freeBlockState {
 		return 0, errors.New("block hasn't been allocated yet")
 	}
@@ -162,7 +164,7 @@ func (cb CachedBlock[T]) Commit() (CachedBlock[T], error) {
 }
 
 // FetchBlock returns structure representing existing block of particular type.
-func FetchBlock[T types.Block](cache *Cache, address types.BlockAddress) (CachedBlock[T], error) {
+func FetchBlock[T constraint.Block](cache *Cache, address blocks.BlockAddress) (CachedBlock[T], error) {
 	header, data, err := cache.fetchBlock(address)
 	if err != nil {
 		return CachedBlock[T]{}, err
@@ -178,7 +180,7 @@ func FetchBlock[T types.Block](cache *Cache, address types.BlockAddress) (Cached
 }
 
 // NewBlock returns structure representing new block of particular type.
-func NewBlock[T types.Block](cache *Cache) CachedBlock[T] {
+func NewBlock[T constraint.Block](cache *Cache) CachedBlock[T] {
 	return CachedBlock[T]{
 		cache: cache,
 	}
