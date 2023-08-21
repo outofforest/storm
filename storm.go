@@ -195,10 +195,7 @@ func (kp keyPath[T]) Commit() (cache.CachedBlock[T], error) {
 	if err != nil {
 		return cache.CachedBlock[T]{}, err
 	}
-	structCheksum, dataChecksum, err := leaf.Block.ComputeChecksums()
-	if err != nil {
-		return cache.CachedBlock[T]{}, err
-	}
+	checksum := leaf.Block.ComputeChecksum()
 
 	if nHops := len(kp.hops); nHops > 0 {
 		lastHop := kp.hops[nHops-1]
@@ -210,9 +207,8 @@ func (kp keyPath[T]) Commit() (cache.CachedBlock[T], error) {
 		for i := nHops - 1; i >= 0; i-- {
 			hop := kp.hops[i]
 			hop.Block.Block.Pointers[hop.Index] = pointerV0.Pointer{
-				Address:        address,
-				StructChecksum: structCheksum,
-				DataChecksum:   dataChecksum,
+				Address:  address,
+				Checksum: checksum,
 			}
 			pointerBlock, err := hop.Block.Commit()
 			if err != nil {
@@ -222,10 +218,7 @@ func (kp keyPath[T]) Commit() (cache.CachedBlock[T], error) {
 			if err != nil {
 				return cache.CachedBlock[T]{}, err
 			}
-			structCheksum, dataChecksum, err = leaf.Block.ComputeChecksums()
-			if err != nil {
-				return cache.CachedBlock[T]{}, err
-			}
+			checksum = leaf.Block.ComputeChecksum()
 		}
 	}
 
@@ -234,9 +227,8 @@ func (kp keyPath[T]) Commit() (cache.CachedBlock[T], error) {
 		*kp.rootBlockSchemaVersion = kp.leafSchemaVersion
 	}
 	*kp.rootPointer = pointerV0.Pointer{
-		StructChecksum: structCheksum,
-		DataChecksum:   dataChecksum,
-		Address:        address,
+		Checksum: checksum,
+		Address:  address,
 	}
 
 	return leaf, nil

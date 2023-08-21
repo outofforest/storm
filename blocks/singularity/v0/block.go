@@ -11,11 +11,11 @@ import (
 
 // Block is the starting block of the store. Everything starts and ends here.
 type Block struct {
-	SchemaVersion  blocks.SchemaVersion
-	StructChecksum blocks.Hash
-	StormID        uint64
-	Revision       uint64
-	NBlocks        uint64
+	SchemaVersion blocks.SchemaVersion
+	Checksum      blocks.Hash
+	StormID       uint64
+	Revision      uint64
+	NBlocks       uint64
 
 	RootData              pointerV0.Pointer
 	RootDataBlockType     blocks.BlockType
@@ -25,8 +25,8 @@ type Block struct {
 	LastAllocatedBlock blocks.BlockAddress
 }
 
-// ComputeChecksums computes struct checksum of the block.
-func (b Block) ComputeChecksums() (blocks.Hash, blocks.Hash, error) {
-	b.StructChecksum = blocks.Hash{}
-	return sha256.Sum256(photon.NewFromValue(&b).B), blocks.Hash{}, nil
+// ComputeChecksum computes checksum of the block.
+func (b Block) ComputeChecksum() blocks.Hash {
+	b.Checksum = blocks.Hash{}
+	return sha256.Sum256(photon.NewFromValue(&b).B)
 }
