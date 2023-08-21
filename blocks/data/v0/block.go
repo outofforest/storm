@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 
 	"github.com/outofforest/photon"
-	"github.com/pkg/errors"
 
 	"github.com/outofforest/storm/blocks"
 )
@@ -37,20 +36,7 @@ type Block struct {
 	RecordStates [RecordsPerBlock]RecordState
 }
 
-// ComputeChecksums computes struct and data checksums of the block.
-func (b Block) ComputeChecksums() (blocks.Hash, blocks.Hash, error) {
-	hash := sha256.New()
-	for i, state := range b.RecordStates {
-		if state != FreeRecordState {
-			_, err := hash.Write(b.Records[i].Key[:])
-			if err != nil {
-				return blocks.Hash{}, blocks.Hash{}, errors.WithStack(err)
-			}
-			_, err = hash.Write(b.Records[i].Value[:])
-			if err != nil {
-				return blocks.Hash{}, blocks.Hash{}, errors.WithStack(err)
-			}
-		}
-	}
-	return sha256.Sum256(photon.NewFromValue(&b).B), blocks.Hash(hash.Sum(nil)), nil
+// ComputeChecksum computes checksum of the block.
+func (b Block) ComputeChecksum() blocks.Hash {
+	return sha256.Sum256(photon.NewFromValue(&b).B)
 }

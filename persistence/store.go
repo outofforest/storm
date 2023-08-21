@@ -71,14 +71,10 @@ func validateSingularityBlock(sBlock photon.Union[singularityV0.Block]) error {
 		return errors.New("device does not contain storm storage system")
 	}
 
-	checksumComputed, _, err := sBlock.V.ComputeChecksums()
-	if err != nil {
-		return err
-	}
-
-	if sBlock.V.StructChecksum != checksumComputed {
+	checksumComputed := sBlock.V.ComputeChecksum()
+	if sBlock.V.Checksum != checksumComputed {
 		return errors.Errorf("checksum mismatch for the singularity block, computed: %s, stored: %s",
-			hex.EncodeToString(checksumComputed[:]), hex.EncodeToString(sBlock.V.StructChecksum[:]))
+			hex.EncodeToString(checksumComputed[:]), hex.EncodeToString(sBlock.V.Checksum[:]))
 	}
 
 	return nil

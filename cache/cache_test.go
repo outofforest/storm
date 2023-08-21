@@ -34,10 +34,7 @@ func TestFetchSingularityBlock(t *testing.T) {
 	block, err := FetchBlock[singularityV0.Block](cache, 0)
 	requireT.NoError(err)
 
-	checksumComputed, _, err := block.Block.ComputeChecksums()
-	requireT.NoError(err)
-
-	requireT.Equal(checksumComputed, block.Block.StructChecksum)
+	requireT.Equal(block.Block.ComputeChecksum(), block.Block.Checksum)
 }
 
 func TestFetchBlockByAddress(t *testing.T) {

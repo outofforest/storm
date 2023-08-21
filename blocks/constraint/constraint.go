@@ -10,5 +10,5 @@ import (
 // Block defines the constraint for generics using block types.
 type Block interface {
 	singularityV0.Block | pointerV0.Block | dataV0.Block
-	ComputeChecksums() (blocks.Hash, blocks.Hash, error)
+	ComputeChecksum() blocks.Hash
 }

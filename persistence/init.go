@@ -43,11 +43,7 @@ func Initialize(dev Dev, overwrite bool) error {
 		NBlocks:            uint64(dev.Size() / blocks.BlockSize),
 		LastAllocatedBlock: 1,
 	})
-	checksum, _, err := sBlock.V.ComputeChecksums()
-	if err != nil {
-		return err
-	}
-	sBlock.V.StructChecksum = checksum
+	sBlock.V.Checksum = sBlock.V.ComputeChecksum()
 
 	if _, err := dev.Seek(0, io.SeekStart); err != nil {
 		return errors.WithStack(err)

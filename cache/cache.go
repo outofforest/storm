@@ -64,11 +64,7 @@ func (c *Cache) Commit() error {
 	// TODO (wojciech): Write each new version to rotating location
 
 	c.singularityBlock.V.Revision++
-	checksum, _, err := c.singularityBlock.V.ComputeChecksums()
-	if err != nil {
-		return err
-	}
-	c.singularityBlock.V.StructChecksum = checksum
+	c.singularityBlock.V.Checksum = c.singularityBlock.V.ComputeChecksum()
 	if err := c.store.WriteBlock(0, c.singularityBlock.B); err != nil {
 		return err
 	}
