@@ -154,7 +154,7 @@ func lookupByKey[T constraint.Block](
 			}
 			return keyPath[T]{}, false, nil
 		case blocks.LeafBlockType:
-			leafBlock, err := cache.FetchBlock[T](c, currentPointer.Address)
+			leafBlock, err := cache.FetchBlock[T](c, currentPointer)
 			if err != nil {
 				return keyPath[T]{}, false, err
 			}
@@ -167,7 +167,7 @@ func lookupByKey[T constraint.Block](
 				Leaf:                   leafBlock,
 			}, true, nil
 		case blocks.PointerBlockType:
-			pointerBlock, err := cache.FetchBlock[pointerV0.Block](c, currentPointer.Address)
+			pointerBlock, err := cache.FetchBlock[pointerV0.Block](c, currentPointer)
 			if err != nil {
 				return keyPath[T]{}, false, err
 			}

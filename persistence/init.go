@@ -69,27 +69,29 @@ func validateDev(dev Dev, overwrite bool) error {
 		return errors.Errorf("device is too small, minimum size is: %d bytes, provided: %d", minNBlocks*blocks.BlockSize, size)
 	}
 
-	sBlock, err := loadSingularityBlock(dev)
+	_, sBlock, err := loadSingularityBlock(dev)
 	if err != nil {
 		return err
 	}
 
-	if sBlock.V.StormID&stormSubject == stormSubject && !overwrite {
+	if sBlock.StormID&stormSubject == stormSubject && !overwrite {
 		return errors.WithStack(ErrAlreadyInitialized)
 	}
 
 	return nil
 }
 
-func loadSingularityBlock(dev Dev) (photon.Union[singularityV0.Block], error) {
-	if _, err := dev.Seek(0, io.SeekStart); err != nil {
-		return photon.Union[singularityV0.Block]{}, errors.WithStack(err)
+//nolint:unparam // returned bock address won't be always 0 in the future
+func loadSingularityBlock(dev Dev) (blocks.BlockAddress, singularityV0.Block, error) {
+	var address blocks.BlockAddress
+	if _, err := dev.Seek(int64(address)*blocks.BlockSize, io.SeekStart); err != nil {
+		return 0, singularityV0.Block{}, errors.WithStack(err)
 	}
 
 	sBlock := photon.NewFromBytes[singularityV0.Block](make([]byte, blocks.BlockSize))
 	if _, err := dev.Read(sBlock.B); err != nil {
-		return photon.Union[singularityV0.Block]{}, errors.WithStack(err)
+		return 0, singularityV0.Block{}, errors.WithStack(err)
 	}
 
-	return sBlock, nil
+	return address, *sBlock.V, nil
 }

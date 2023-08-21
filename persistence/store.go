@@ -1,7 +1,6 @@
 package persistence
 
 import (
-	"encoding/hex"
 	"io"
 
 	"github.com/outofforest/photon"
@@ -18,11 +17,11 @@ type Store struct {
 
 // OpenStore opens the persistent store.
 func OpenStore(dev Dev) (*Store, error) {
-	sBlock, err := loadSingularityBlock(dev)
+	address, sBlock, err := loadSingularityBlock(dev)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateSingularityBlock(sBlock); err != nil {
+	if err := validateSingularityBlock(address, sBlock); err != nil {
 		return nil, err
 	}
 
@@ -66,16 +65,12 @@ func (s *Store) Sync() error {
 	return errors.WithStack(s.dev.Sync())
 }
 
-func validateSingularityBlock(sBlock photon.Union[singularityV0.Block]) error {
-	if sBlock.V.StormID&stormSubject != stormSubject {
+func validateSingularityBlock(address blocks.BlockAddress, sBlock singularityV0.Block) error {
+	if sBlock.StormID&stormSubject != stormSubject {
 		return errors.New("device does not contain storm storage system")
 	}
 
-	checksumComputed := sBlock.V.ComputeChecksum()
-	if sBlock.V.Checksum != checksumComputed {
-		return errors.Errorf("checksum mismatch for the singularity block, computed: %s, stored: %s",
-			hex.EncodeToString(checksumComputed[:]), hex.EncodeToString(sBlock.V.Checksum[:]))
-	}
-
-	return nil
+	sBlock2 := sBlock
+	sBlock2.Checksum = blocks.Hash{}
+	return blocks.VerifyChecksum(address, photon.NewFromValue(&sBlock2).B, sBlock.Checksum)
 }

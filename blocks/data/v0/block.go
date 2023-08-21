@@ -1,8 +1,6 @@
 package v0
 
 import (
-	"crypto/sha256"
-
 	"github.com/outofforest/photon"
 
 	"github.com/outofforest/storm/blocks"
@@ -38,5 +36,5 @@ type Block struct {
 
 // ComputeChecksum computes checksum of the block.
 func (b Block) ComputeChecksum() blocks.Hash {
-	return sha256.Sum256(photon.NewFromValue(&b).B)
+	return blocks.Checksum(photon.NewFromValue(&b).B)
 }

@@ -1,11 +1,14 @@
 package cache
 
 import (
+	"unsafe"
+
 	"github.com/outofforest/photon"
 	"github.com/pkg/errors"
 
 	"github.com/outofforest/storm/blocks"
 	"github.com/outofforest/storm/blocks/constraint"
+	pointerV0 "github.com/outofforest/storm/blocks/pointer/v0"
 	singularityV0 "github.com/outofforest/storm/blocks/singularity/v0"
 	"github.com/outofforest/storm/persistence"
 )
@@ -78,12 +81,13 @@ func (c *Cache) Commit() error {
 	return nil
 }
 
-func (c *Cache) fetchBlock(address blocks.BlockAddress) (header, []byte, error) {
+func (c *Cache) fetchBlock(
+	address blocks.BlockAddress,
+	nBytes int64,
+	expectedChecksum blocks.Hash,
+) (header, []byte, error) {
 	if address > c.singularityBlock.V.LastAllocatedBlock {
 		return header{}, nil, errors.Errorf("block %d does not exist", address)
-	}
-	if address == 0 {
-		return header{}, c.singularityBlock.B, nil
 	}
 
 	// TODO (wojciech): Implement open addressing
@@ -93,12 +97,17 @@ func (c *Cache) fetchBlock(address blocks.BlockAddress) (header, []byte, error) 
 	for offset := int64(0); offset < c.size; offset += CachedBlockSize {
 		h := photon.NewFromBytes[header](c.data[offset:])
 		if h.V.State == freeBlockState {
-			if err := c.store.ReadBlock(address, c.data[offset+CacheHeaderSize:offset+CachedBlockSize]); err != nil {
+			dataOffset := offset + CacheHeaderSize
+			blockBuffer := c.data[dataOffset : dataOffset+nBytes]
+			if err := c.store.ReadBlock(address, blockBuffer); err != nil {
+				return header{}, nil, err
+			}
+			if err := blocks.VerifyChecksum(address, blockBuffer, expectedChecksum); err != nil {
 				return header{}, nil, err
 			}
 			h.V.Address = address
 			h.V.State = fetchedBlockState
-			return *h.V, c.data[offset+CacheHeaderSize : offset+CachedBlockSize], nil
+			return *h.V, blockBuffer, nil
 		}
 		if h.V.Address == address {
 			return *h.V, c.data[offset+CacheHeaderSize : offset+CachedBlockSize], nil
@@ -160,8 +169,12 @@ func (cb CachedBlock[T]) Commit() (CachedBlock[T], error) {
 }
 
 // FetchBlock returns structure representing existing block of particular type.
-func FetchBlock[T constraint.Block](cache *Cache, address blocks.BlockAddress) (CachedBlock[T], error) {
-	header, data, err := cache.fetchBlock(address)
+func FetchBlock[T constraint.Block](
+	cache *Cache,
+	pointer pointerV0.Pointer,
+) (CachedBlock[T], error) {
+	var v T
+	header, data, err := cache.fetchBlock(pointer.Address, int64(unsafe.Sizeof(v)), pointer.Checksum)
 	if err != nil {
 		return CachedBlock[T]{}, err
 	}
