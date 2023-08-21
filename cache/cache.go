@@ -1,8 +1,6 @@
 package cache
 
 import (
-	"crypto/sha256"
-
 	"github.com/outofforest/photon"
 	"github.com/pkg/errors"
 
@@ -64,8 +62,11 @@ func (c *Cache) Commit() error {
 	// TODO (wojciech): Write each new version to rotating location
 
 	c.singularityBlock.V.Revision++
-	c.singularityBlock.V.StructChecksum = types.Hash{}
-	c.singularityBlock.V.StructChecksum = sha256.Sum256(c.singularityBlock.B)
+	checksum, _, err := c.singularityBlock.V.ComputeChecksums()
+	if err != nil {
+		return err
+	}
+	c.singularityBlock.V.StructChecksum = checksum
 	if err := c.store.WriteBlock(0, c.singularityBlock.B); err != nil {
 		return err
 	}

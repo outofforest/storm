@@ -1,7 +1,6 @@
 package persistence
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"io"
 
@@ -71,13 +70,14 @@ func validateSingularityBlock(sBlock photon.Union[types.SingularityBlock]) error
 		return errors.New("device does not contain storm storage system")
 	}
 
-	storedChecksum := sBlock.V.StructChecksum
-	sBlock.V.StructChecksum = types.Hash{}
-	checksumComputed := types.Hash(sha256.Sum256(sBlock.B))
+	checksumComputed, _, err := sBlock.V.ComputeChecksums()
+	if err != nil {
+		return err
+	}
 
-	if storedChecksum != checksumComputed {
+	if sBlock.V.StructChecksum != checksumComputed {
 		return errors.Errorf("checksum mismatch for the singularity block, computed: %s, stored: %s",
-			hex.EncodeToString(checksumComputed[:]), hex.EncodeToString(storedChecksum[:]))
+			hex.EncodeToString(checksumComputed[:]), hex.EncodeToString(sBlock.V.StructChecksum[:]))
 	}
 
 	return nil

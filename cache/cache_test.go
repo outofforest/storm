@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"crypto/sha256"
 	"io"
 	"testing"
 
@@ -33,11 +32,10 @@ func TestFetchSingularityBlock(t *testing.T) {
 	block, err := FetchBlock[types.SingularityBlock](cache, 0)
 	requireT.NoError(err)
 
-	storedChecksum := block.Block.StructChecksum
-	block.Block.StructChecksum = types.Hash{}
-	checksumComputed := types.Hash(sha256.Sum256(photon.NewFromValue(&block.Block).B))
+	checksumComputed, _, err := block.Block.ComputeChecksums()
+	requireT.NoError(err)
 
-	requireT.Equal(checksumComputed, storedChecksum)
+	requireT.Equal(checksumComputed, block.Block.StructChecksum)
 }
 
 func TestFetchBlockByAddress(t *testing.T) {

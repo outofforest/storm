@@ -24,9 +24,11 @@ func TestSetGet(t *testing.T) {
 	store, err := New(dev, cacheSize)
 	requireT.NoError(err)
 
-	var value uint64 = 12
 	var key [32]byte
 	_, err = rand.Read(key[:])
+	requireT.NoError(err)
+	var value [32]byte
+	_, err = rand.Read(value[:])
 	requireT.NoError(err)
 
 	// Set
