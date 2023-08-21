@@ -29,7 +29,7 @@ type BlockType byte
 const (
 	FreeBlockType BlockType = iota
 	PointerBlockType
-	DataBlockType
+	LeafBlockType
 )
 
 // Block defines the constraint for generics using block types.
@@ -46,10 +46,11 @@ type SingularityBlock struct {
 	StormID        uint64
 	Revision       uint64
 	NBlocks        uint64
-
 	// TODO (wojciech): Replace with correct (de)allocation mechanism
 	LastAllocatedBlock BlockAddress
-	RootData           Pointer
+
+	RootData          Pointer
+	RootDataBlockType BlockType
 }
 
 // Pointer is a pointer to other block.

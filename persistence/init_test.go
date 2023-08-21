@@ -29,30 +29,19 @@ func TestInit(t *testing.T) {
 	_, err = dev.Read(sBlock.B)
 	requireT.NoError(err)
 
-	_, err = dev.Seek(types.BlockSize, io.SeekStart)
-	requireT.NoError(err)
-
-	rootDataBlock := photon.NewFromValue(&types.PointerBlock{})
-	_, err = dev.Read(rootDataBlock.B)
-	requireT.NoError(err)
-
 	requireT.EqualValues(stormSubject, sBlock.V.StormID&stormSubject)
 	requireT.EqualValues(0, sBlock.V.Revision)
 	requireT.EqualValues(dev.Size()/types.BlockSize, int64(sBlock.V.NBlocks))
 	requireT.Less(dev.Size(), int64(sBlock.V.NBlocks+1)*types.BlockSize)
 	requireT.EqualValues(1, sBlock.V.LastAllocatedBlock)
-	requireT.EqualValues(1, sBlock.V.RootData.Address)
-	requireT.EqualValues(sha256.Sum256(rootDataBlock.B), sBlock.V.RootData.StructChecksum)
-	requireT.EqualValues(pointerBlockDataChecksum(rootDataBlock.V), sBlock.V.RootData.DataChecksum)
+	requireT.EqualValues(0, sBlock.V.RootData.Address)
+	requireT.EqualValues(types.FreeBlockType, sBlock.V.RootDataBlockType)
 
 	checksum := sBlock.V.StructChecksum
 	sBlock.V.StructChecksum = types.Hash{}
 	checksumExpected := types.Hash(sha256.Sum256(sBlock.B))
 
 	requireT.Equal(checksumExpected, checksum)
-
-	requireT.EqualValues(0, rootDataBlock.V.NUsedPointers)
-	requireT.Equal([64]types.BlockType{}, rootDataBlock.V.PointedBlockTypes)
 }
 
 func TestOverwrite(t *testing.T) {
@@ -117,10 +106,10 @@ func TestPointerBlockDataChecksum(t *testing.T) {
 	pBlock.Pointers[1].DataChecksum = types.Hash(bytes.Repeat([]byte{0x02}, types.HashSize))
 	assertT.Equal(emptyDataHash, pointerBlockDataChecksum(pBlock))
 
-	pBlock.PointedBlockTypes[0] = types.DataBlockType
+	pBlock.PointedBlockTypes[0] = types.LeafBlockType
 	assertT.Equal(types.Hash{0x72, 0xcd, 0x6e, 0x84, 0x22, 0xc4, 0x7, 0xfb, 0x6d, 0x9, 0x86, 0x90, 0xf1, 0x13, 0xb, 0x7d, 0xed, 0x7e, 0xc2, 0xf7, 0xf5, 0xe1, 0xd3, 0xb, 0xd9, 0xd5, 0x21, 0xf0, 0x15, 0x36, 0x37, 0x93}, pointerBlockDataChecksum(pBlock))
 
-	pBlock.PointedBlockTypes[1] = types.DataBlockType
+	pBlock.PointedBlockTypes[1] = types.LeafBlockType
 	assertT.Equal(finalDataHash, pointerBlockDataChecksum(pBlock))
 
 	// Other fields don't matter
