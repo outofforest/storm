@@ -24,6 +24,11 @@ func OpenStore(dev Dev) (*Store, error) {
 	if err := validateSingularityBlock(address, sBlock); err != nil {
 		return nil, err
 	}
+	availableBlocks := uint64(dev.Size() / blocks.BlockSize)
+	if availableBlocks < sBlock.NBlocks {
+		return nil, errors.Errorf("singularity block reports %d blocks, but only %d are available on the device",
+			sBlock.NBlocks, availableBlocks)
+	}
 
 	return &Store{
 		dev: dev,
