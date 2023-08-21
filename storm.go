@@ -3,9 +3,12 @@ package storm
 import (
 	"github.com/cespare/xxhash/v2"
 
+	"github.com/outofforest/storm/blocks"
+	"github.com/outofforest/storm/blocks/constraint"
+	dataV0 "github.com/outofforest/storm/blocks/data/v0"
+	pointerV0 "github.com/outofforest/storm/blocks/pointer/v0"
 	"github.com/outofforest/storm/cache"
 	"github.com/outofforest/storm/persistence"
-	"github.com/outofforest/storm/types"
 )
 
 // Storm represents the storm storage engine.
@@ -31,14 +34,22 @@ func New(dev persistence.Dev, cacheSize int64) (*Storm, error) {
 // Get gets value for a key from the store.
 func (s *Storm) Get(key [32]byte) ([32]byte, bool, error) {
 	sBlock := s.c.SingularityBlock()
-	dataBlockPath, exists, err := lookupByKey[types.DataBlock](s.c, &sBlock.RootData, &sBlock.RootDataBlockType, false, key)
+	dataBlockPath, exists, err := lookupByKey[dataV0.Block](
+		s.c,
+		&sBlock.RootData,
+		&sBlock.RootDataBlockType,
+		&sBlock.RootDataSchemaVersion,
+		blocks.DataV0,
+		false,
+		key,
+	)
 	if !exists || err != nil {
 		return [32]byte{}, false, err
 	}
 
 	dataBlock := dataBlockPath.Leaf.Block
 
-	if dataBlock.RecordStates[0] == types.FreeRecordState {
+	if dataBlock.RecordStates[0] == dataV0.FreeRecordState {
 		return [32]byte{}, false, nil
 	}
 
@@ -60,7 +71,15 @@ func (s *Storm) Set(key [32]byte, value [32]byte) error {
 	// TODO (wojciech): Implement block splitting
 
 	sBlock := s.c.SingularityBlock()
-	dataBlockPath, _, err := lookupByKey[types.DataBlock](s.c, &sBlock.RootData, &sBlock.RootDataBlockType, true, key)
+	dataBlockPath, _, err := lookupByKey[dataV0.Block](
+		s.c,
+		&sBlock.RootData,
+		&sBlock.RootDataBlockType,
+		&sBlock.RootDataSchemaVersion,
+		blocks.DataV0,
+		true,
+		key,
+	)
 	if err != nil {
 		return err
 	}
@@ -68,9 +87,9 @@ func (s *Storm) Set(key [32]byte, value [32]byte) error {
 	// TODO (wojciech): Find correct record index
 
 	dataBlockPath.Leaf.Block.NUsedRecords = 1
-	dataBlockPath.Leaf.Block.RecordStates[0] = types.DefinedRecordState
+	dataBlockPath.Leaf.Block.RecordStates[0] = dataV0.DefinedRecordState
 	dataBlockPath.Leaf.Block.RecordHashes[0] = xxhash.Sum64(key[:])
-	dataBlockPath.Leaf.Block.Records[0] = types.Record{
+	dataBlockPath.Leaf.Block.Records[0] = dataV0.Record{
 		Key:   key,
 		Value: value,
 	}
@@ -92,20 +111,24 @@ func (s *Storm) Commit() error {
 
 type hop struct {
 	Index uint64
-	Block cache.CachedBlock[types.PointerBlock]
+	Block cache.CachedBlock[pointerV0.Block]
 }
 
-type keyPath[T types.Block] struct {
-	rootPointer   *types.Pointer
-	rootBlockType *types.BlockType
-	hops          []hop
-	Leaf          cache.CachedBlock[T]
+type keyPath[T constraint.Block] struct {
+	rootPointer            *pointerV0.Pointer
+	rootBlockType          *blocks.BlockType
+	rootBlockSchemaVersion *blocks.SchemaVersion
+	leafSchemaVersion      blocks.SchemaVersion
+	hops                   []hop
+	Leaf                   cache.CachedBlock[T]
 }
 
-func lookupByKey[T types.Block](
+func lookupByKey[T constraint.Block](
 	c *cache.Cache,
-	rootPointer *types.Pointer,
-	rootBlockType *types.BlockType,
+	rootPointer *pointerV0.Pointer,
+	rootBlockType *blocks.BlockType,
+	rootBlockSchemaVersion *blocks.SchemaVersion,
+	leafSchemaVersion blocks.SchemaVersion,
 	createIfMissing bool,
 	key [32]byte,
 ) (keyPath[T], bool, error) {
@@ -118,35 +141,39 @@ func lookupByKey[T types.Block](
 
 	for {
 		switch currentPointedBlockType {
-		case types.FreeBlockType:
+		case blocks.FreeBlockType:
 			if createIfMissing {
 				return keyPath[T]{
-					rootPointer:   rootPointer,
-					rootBlockType: rootBlockType,
-					hops:          hops,
-					Leaf:          cache.NewBlock[T](c),
+					rootPointer:            rootPointer,
+					rootBlockType:          rootBlockType,
+					rootBlockSchemaVersion: rootBlockSchemaVersion,
+					leafSchemaVersion:      leafSchemaVersion,
+					hops:                   hops,
+					Leaf:                   cache.NewBlock[T](c),
 				}, true, nil
 			}
 			return keyPath[T]{}, false, nil
-		case types.LeafBlockType:
+		case blocks.LeafBlockType:
 			leafBlock, err := cache.FetchBlock[T](c, currentPointer.Address)
 			if err != nil {
 				return keyPath[T]{}, false, err
 			}
 			return keyPath[T]{
-				rootPointer:   rootPointer,
-				rootBlockType: rootBlockType,
-				hops:          hops,
-				Leaf:          leafBlock,
+				rootPointer:            rootPointer,
+				rootBlockType:          rootBlockType,
+				rootBlockSchemaVersion: rootBlockSchemaVersion,
+				leafSchemaVersion:      leafSchemaVersion,
+				hops:                   hops,
+				Leaf:                   leafBlock,
 			}, true, nil
-		case types.PointerBlockType:
-			pointerBlock, err := cache.FetchBlock[types.PointerBlock](c, currentPointer.Address)
+		case blocks.PointerBlockType:
+			pointerBlock, err := cache.FetchBlock[pointerV0.Block](c, currentPointer.Address)
 			if err != nil {
 				return keyPath[T]{}, false, err
 			}
 
-			pointerIndex := hopAddressing & (types.PointersPerBlock - 1)
-			hopAddressing >>= types.PointersPerBlockShift
+			pointerIndex := hopAddressing & (pointerV0.PointersPerBlock - 1)
+			hopAddressing >>= blocks.PointersPerBlockShift
 
 			currentPointedBlockType = pointerBlock.Block.PointedBlockTypes[pointerIndex]
 			currentPointer = pointerBlock.Block.Pointers[pointerIndex]
@@ -175,13 +202,14 @@ func (kp keyPath[T]) Commit() (cache.CachedBlock[T], error) {
 
 	if nHops := len(kp.hops); nHops > 0 {
 		lastHop := kp.hops[nHops-1]
-		if lastHop.Block.Block.PointedBlockTypes[lastHop.Index] == types.FreeBlockType {
+		if lastHop.Block.Block.PointedBlockTypes[lastHop.Index] == blocks.FreeBlockType {
 			lastHop.Block.Block.NUsedPointers++
-			lastHop.Block.Block.PointedBlockTypes[lastHop.Index] = types.LeafBlockType
+			lastHop.Block.Block.PointedBlockTypes[lastHop.Index] = blocks.LeafBlockType
+			lastHop.Block.Block.PointedBlockVersions[lastHop.Index] = kp.leafSchemaVersion
 		}
 		for i := nHops - 1; i >= 0; i-- {
 			hop := kp.hops[i]
-			hop.Block.Block.Pointers[hop.Index] = types.Pointer{
+			hop.Block.Block.Pointers[hop.Index] = pointerV0.Pointer{
 				Address:        address,
 				StructChecksum: structCheksum,
 				DataChecksum:   dataChecksum,
@@ -201,10 +229,11 @@ func (kp keyPath[T]) Commit() (cache.CachedBlock[T], error) {
 		}
 	}
 
-	if *kp.rootBlockType == types.FreeBlockType {
-		*kp.rootBlockType = types.LeafBlockType
+	if *kp.rootBlockType == blocks.FreeBlockType {
+		*kp.rootBlockType = blocks.LeafBlockType
+		*kp.rootBlockSchemaVersion = kp.leafSchemaVersion
 	}
-	*kp.rootPointer = types.Pointer{
+	*kp.rootPointer = pointerV0.Pointer{
 		StructChecksum: structCheksum,
 		DataChecksum:   dataChecksum,
 		Address:        address,

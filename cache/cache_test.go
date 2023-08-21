@@ -7,9 +7,11 @@ import (
 	"github.com/outofforest/photon"
 	"github.com/stretchr/testify/require"
 
+	"github.com/outofforest/storm/blocks"
+	pointerV0 "github.com/outofforest/storm/blocks/pointer/v0"
+	singularityV0 "github.com/outofforest/storm/blocks/singularity/v0"
 	"github.com/outofforest/storm/persistence"
 	"github.com/outofforest/storm/pkg/memdev"
-	"github.com/outofforest/storm/types"
 )
 
 const (
@@ -29,7 +31,7 @@ func TestFetchSingularityBlock(t *testing.T) {
 	cache, err := New(store, cacheSize)
 	requireT.NoError(err)
 
-	block, err := FetchBlock[types.SingularityBlock](cache, 0)
+	block, err := FetchBlock[singularityV0.Block](cache, 0)
 	requireT.NoError(err)
 
 	checksumComputed, _, err := block.Block.ComputeChecksums()
@@ -56,32 +58,32 @@ func TestFetchBlockByAddress(t *testing.T) {
 
 	// Set new block directly on dev and read it from cache to test that data are correctly loaded to it.
 
-	newBlock := photon.NewFromValue(&types.PointerBlock{})
+	newBlock := photon.NewFromValue(&pointerV0.Block{})
 	newBlock.V.Pointers[pointerIndex].Address = 21
 
-	_, err = dev.Seek(types.BlockSize, io.SeekStart)
+	_, err = dev.Seek(blocks.BlockSize, io.SeekStart)
 	requireT.NoError(err)
 	_, err = dev.Write(newBlock.B)
 	requireT.NoError(err)
 
-	block, err := FetchBlock[types.PointerBlock](cache, 1)
+	block, err := FetchBlock[pointerV0.Block](cache, 1)
 	requireT.NoError(err)
 
-	requireT.Equal(types.BlockAddress(21), block.Block.Pointers[pointerIndex].Address)
+	requireT.Equal(blocks.BlockAddress(21), block.Block.Pointers[pointerIndex].Address)
 
 	// Modify block directly on dev and read it from cache again to verify that cache returns unmodified cached version.
 
 	newBlock.V.Pointers[pointerIndex].Address = 22
 
-	_, err = dev.Seek(types.BlockSize, io.SeekStart)
+	_, err = dev.Seek(blocks.BlockSize, io.SeekStart)
 	requireT.NoError(err)
 	_, err = dev.Write(newBlock.B)
 	requireT.NoError(err)
 
-	block, err = FetchBlock[types.PointerBlock](cache, 1)
+	block, err = FetchBlock[pointerV0.Block](cache, 1)
 	requireT.NoError(err)
 
-	requireT.Equal(types.BlockAddress(21), block.Block.Pointers[pointerIndex].Address)
+	requireT.Equal(blocks.BlockAddress(21), block.Block.Pointers[pointerIndex].Address)
 }
 
 func TestCommitNewBlock(t *testing.T) {
@@ -100,46 +102,46 @@ func TestCommitNewBlock(t *testing.T) {
 
 	// Fetching block before it is created returns an error
 
-	_, err = FetchBlock[types.PointerBlock](cache, 2)
+	_, err = FetchBlock[pointerV0.Block](cache, 2)
 	requireT.Error(err)
 
 	// Create new block
 
-	newBlock := NewBlock[types.PointerBlock](cache)
+	newBlock := NewBlock[pointerV0.Block](cache)
 	newBlock.Block.Pointers[pointerIndex].Address = 21
 
 	// Block is not allocated yet.
 
-	requireT.Equal(types.BlockAddress(1), cache.singularityBlock.V.LastAllocatedBlock)
-	requireT.Equal(types.BlockAddress(0), newBlock.header.Address)
+	requireT.Equal(blocks.BlockAddress(1), cache.singularityBlock.V.LastAllocatedBlock)
+	requireT.Equal(blocks.BlockAddress(0), newBlock.header.Address)
 	requireT.Equal(freeBlockState, newBlock.header.State)
 
 	// Address method returns error
 
 	address, err := newBlock.Address()
 	requireT.Error(err)
-	requireT.Equal(types.BlockAddress(0), address)
+	requireT.Equal(blocks.BlockAddress(0), address)
 
 	// Block should be allocated after committing
 
 	newBlock, err = newBlock.Commit()
 	requireT.NoError(err)
-	requireT.Equal(types.BlockAddress(2), cache.singularityBlock.V.LastAllocatedBlock)
-	requireT.Equal(types.BlockAddress(2), newBlock.header.Address)
+	requireT.Equal(blocks.BlockAddress(2), cache.singularityBlock.V.LastAllocatedBlock)
+	requireT.Equal(blocks.BlockAddress(2), newBlock.header.Address)
 	requireT.Equal(newBlockState, newBlock.header.State)
 
 	// Address method should work now
 
 	address, err = newBlock.Address()
 	requireT.NoError(err)
-	requireT.Equal(types.BlockAddress(2), address)
+	requireT.Equal(blocks.BlockAddress(2), address)
 
 	// Fetching block from cache should work now
 
-	block, err := FetchBlock[types.PointerBlock](cache, 2)
+	block, err := FetchBlock[pointerV0.Block](cache, 2)
 	requireT.NoError(err)
-	requireT.Equal(types.BlockAddress(21), block.Block.Pointers[pointerIndex].Address)
-	requireT.Equal(types.BlockAddress(2), block.header.Address)
+	requireT.Equal(blocks.BlockAddress(21), block.Block.Pointers[pointerIndex].Address)
+	requireT.Equal(blocks.BlockAddress(2), block.header.Address)
 	requireT.Equal(newBlockState, block.header.State)
 
 	// Update block
@@ -150,8 +152,8 @@ func TestCommitNewBlock(t *testing.T) {
 
 	// No new block should be allocated
 
-	requireT.Equal(types.BlockAddress(2), cache.singularityBlock.V.LastAllocatedBlock)
-	requireT.Equal(types.BlockAddress(2), block.header.Address)
+	requireT.Equal(blocks.BlockAddress(2), cache.singularityBlock.V.LastAllocatedBlock)
+	requireT.Equal(blocks.BlockAddress(2), block.header.Address)
 	requireT.Equal(newBlockState, block.header.State)
 
 	// Nothing should be updated so far on dev
@@ -159,11 +161,11 @@ func TestCommitNewBlock(t *testing.T) {
 	_, err = dev.Seek(0, io.SeekStart)
 	requireT.NoError(err)
 
-	devSBlock := photon.NewFromValue(&types.SingularityBlock{})
+	devSBlock := photon.NewFromValue(&singularityV0.Block{})
 	_, err = dev.Read(devSBlock.B)
 	requireT.NoError(err)
 
-	requireT.Equal(types.BlockAddress(1), devSBlock.V.LastAllocatedBlock)
+	requireT.Equal(blocks.BlockAddress(1), devSBlock.V.LastAllocatedBlock)
 
 	// Committing changes
 
@@ -174,26 +176,26 @@ func TestCommitNewBlock(t *testing.T) {
 	_, err = dev.Seek(0, io.SeekStart)
 	requireT.NoError(err)
 
-	devSBlock = photon.NewFromValue(&types.SingularityBlock{})
+	devSBlock = photon.NewFromValue(&singularityV0.Block{})
 	_, err = dev.Read(devSBlock.B)
 	requireT.NoError(err)
 
-	_, err = dev.Seek(2*types.BlockSize, io.SeekStart)
+	_, err = dev.Seek(2*blocks.BlockSize, io.SeekStart)
 	requireT.NoError(err)
 
-	devNewBlock := photon.NewFromValue(&types.PointerBlock{})
+	devNewBlock := photon.NewFromValue(&pointerV0.Block{})
 	_, err = dev.Read(devNewBlock.B)
 	requireT.NoError(err)
 
-	requireT.Equal(types.BlockAddress(2), devSBlock.V.LastAllocatedBlock)
-	requireT.Equal(types.BlockAddress(22), devNewBlock.V.Pointers[pointerIndex].Address)
+	requireT.Equal(blocks.BlockAddress(2), devSBlock.V.LastAllocatedBlock)
+	requireT.Equal(blocks.BlockAddress(22), devNewBlock.V.Pointers[pointerIndex].Address)
 
 	// Status of the block should be `fetched`
 
-	block, err = FetchBlock[types.PointerBlock](cache, 2)
+	block, err = FetchBlock[pointerV0.Block](cache, 2)
 	requireT.NoError(err)
-	requireT.Equal(types.BlockAddress(22), block.Block.Pointers[pointerIndex].Address)
-	requireT.Equal(types.BlockAddress(2), block.header.Address)
+	requireT.Equal(blocks.BlockAddress(22), block.Block.Pointers[pointerIndex].Address)
+	requireT.Equal(blocks.BlockAddress(2), block.header.Address)
 	requireT.Equal(fetchedBlockState, block.header.State)
 
 	// Create new cache, read blocks and verify that new values are there
@@ -201,20 +203,20 @@ func TestCommitNewBlock(t *testing.T) {
 	cache2, err := New(store, cacheSize)
 	requireT.NoError(err)
 
-	block, err = FetchBlock[types.PointerBlock](cache2, 2)
+	block, err = FetchBlock[pointerV0.Block](cache2, 2)
 	requireT.NoError(err)
 
-	requireT.Equal(types.BlockAddress(2), cache2.singularityBlock.V.LastAllocatedBlock)
-	requireT.Equal(types.BlockAddress(22), block.Block.Pointers[pointerIndex].Address)
+	requireT.Equal(blocks.BlockAddress(2), cache2.singularityBlock.V.LastAllocatedBlock)
+	requireT.Equal(blocks.BlockAddress(22), block.Block.Pointers[pointerIndex].Address)
 	requireT.Equal(fetchedBlockState, block.header.State)
-	requireT.Equal(types.BlockAddress(2), block.header.Address)
+	requireT.Equal(blocks.BlockAddress(2), block.header.Address)
 
 	// Updating fetched block should create a new one
 
 	block.Block.Pointers[pointerIndex].Address = 23
 	nextBlock, err := block.Commit()
 	requireT.NoError(err)
-	requireT.Equal(types.BlockAddress(3), cache2.singularityBlock.V.LastAllocatedBlock)
-	requireT.Equal(types.BlockAddress(3), nextBlock.header.Address)
+	requireT.Equal(blocks.BlockAddress(3), cache2.singularityBlock.V.LastAllocatedBlock)
+	requireT.Equal(blocks.BlockAddress(3), nextBlock.header.Address)
 	requireT.Equal(newBlockState, nextBlock.header.State)
 }
