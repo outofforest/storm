@@ -2,15 +2,11 @@ package cache
 
 import (
 	"testing"
-	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestHeaderSize(t *testing.T) {
-	assert.LessOrEqual(t, uint64(unsafe.Sizeof(header{})), uint64(CacheHeaderSize))
-	assert.Greater(t, uint64(unsafe.Sizeof(header{})), uint64(CacheHeaderSize-alignment))
-}
+const alignment = 8
 
 func TestHeaderSizeIsAligned(t *testing.T) {
 	assert.EqualValues(t, 0, CacheHeaderSize%alignment)

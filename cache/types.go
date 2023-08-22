@@ -7,16 +7,11 @@ import (
 )
 
 const (
-	// alignment specifies the alignment requirements of the architecture
-	alignment = 8
-
-	// CacheHeaderSize is the maximum size of the header in cached block.
-	// This magic ensures that the header size is a multiplication of 8, meaning that block data following the header are
-	// correctly aligned.
-	CacheHeaderSize = (int64(unsafe.Sizeof(header{})-1)/alignment + 1) * alignment
-
 	// CachedBlockSize is the size of the cached block stored in memory.
-	CachedBlockSize = blocks.BlockSize + CacheHeaderSize
+	CachedBlockSize = int64(unsafe.Sizeof(block[dummyBlock]{}))
+
+	// CacheHeaderSize is the size of the header in cached block.
+	CacheHeaderSize = CachedBlockSize - blocks.BlockSize
 )
 
 // blockState is the enum representing the state of the block.
@@ -33,4 +28,19 @@ const (
 type header struct {
 	Address blocks.BlockAddress
 	State   blockState
+}
+
+// block represents block in cache.
+type block[T blocks.Block] struct {
+	Header header
+	Block  T
+}
+
+// dummyBlock is a dummy structure used to measure the size of block in cache.
+type dummyBlock struct {
+	Content [blocks.BlockSize]byte
+}
+
+func (b dummyBlock) ComputeChecksum() blocks.Hash {
+	return blocks.Hash{}
 }

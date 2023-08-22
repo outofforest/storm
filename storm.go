@@ -4,7 +4,6 @@ import (
 	"github.com/cespare/xxhash/v2"
 
 	"github.com/outofforest/storm/blocks"
-	"github.com/outofforest/storm/blocks/constraint"
 	dataV0 "github.com/outofforest/storm/blocks/data/v0"
 	pointerV0 "github.com/outofforest/storm/blocks/pointer/v0"
 	"github.com/outofforest/storm/cache"
@@ -114,7 +113,7 @@ type hop struct {
 	Block cache.CachedBlock[pointerV0.Block]
 }
 
-type keyPath[T constraint.Block] struct {
+type keyPath[T blocks.Block] struct {
 	rootPointer            *pointerV0.Pointer
 	rootBlockType          *blocks.BlockType
 	rootBlockSchemaVersion *blocks.SchemaVersion
@@ -123,7 +122,7 @@ type keyPath[T constraint.Block] struct {
 	Leaf                   cache.CachedBlock[T]
 }
 
-func lookupByKey[T constraint.Block](
+func lookupByKey[T blocks.Block](
 	c *cache.Cache,
 	rootPointer *pointerV0.Pointer,
 	rootBlockType *blocks.BlockType,
