@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/outofforest/storm/blocks"
 	"github.com/outofforest/storm/persistence"
 	"github.com/outofforest/storm/pkg/memdev"
 )
@@ -27,9 +28,7 @@ func TestSetGet(t *testing.T) {
 	var key [32]byte
 	_, err = rand.Read(key[:])
 	requireT.NoError(err)
-	var value [32]byte
-	_, err = rand.Read(value[:])
-	requireT.NoError(err)
+	var value blocks.ObjectID = 4
 
 	// Set
 

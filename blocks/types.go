@@ -47,3 +47,6 @@ type Block interface {
 	comparable
 	ComputeChecksum() Hash
 }
+
+// ObjectID is the ID of the object in storm.
+type ObjectID uint64
