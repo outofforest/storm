@@ -12,6 +12,8 @@ import (
 	"github.com/outofforest/storm/persistence"
 )
 
+var zeroContent = make([]byte, CachedBlockSize)
+
 // Cache caches blocks.
 type Cache struct {
 	store *persistence.Store
@@ -124,10 +126,16 @@ func (c *Cache) newBlock(nBytes int64) ([]byte, error) {
 	for offset := int64(0); offset < c.size; offset += CachedBlockSize {
 		header := photon.NewFromBytes[header](c.data[offset:])
 		if header.V.State == freeBlockState {
+			dataBuffer := c.data[offset : offset+CacheHeaderSize+nBytes]
+
+			// This is done because memory used for padding in structs is not zeroed automatically,
+			// causing mismatch in hashes.
+			copy(dataBuffer, zeroContent)
+
 			c.singularityBlock.V.LastAllocatedBlock++
 			header.V.Address = c.singularityBlock.V.LastAllocatedBlock
 			header.V.State = newBlockState
-			return c.data[offset : offset+CacheHeaderSize+nBytes], nil
+			return dataBuffer, nil
 		}
 	}
 
