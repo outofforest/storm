@@ -38,7 +38,7 @@ func (s *Storm) Get(key [32]byte) (blocks.ObjectID, bool, error) {
 		&sBlock.RootData,
 		&sBlock.RootDataBlockType,
 		&sBlock.RootDataSchemaVersion,
-		blocks.DataV0,
+		blocks.ObjectListV0,
 		false,
 		key,
 	)
@@ -75,7 +75,7 @@ func (s *Storm) Set(key [32]byte, objectID blocks.ObjectID) error {
 		&sBlock.RootData,
 		&sBlock.RootDataBlockType,
 		&sBlock.RootDataSchemaVersion,
-		blocks.DataV0,
+		blocks.ObjectListV0,
 		true,
 		key,
 	)

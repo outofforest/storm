@@ -33,7 +33,7 @@ type SchemaVersion uint16
 const (
 	SingularityV0 SchemaVersion = iota
 	PointerV0
-	DataV0
+	ObjectListV0
 )
 
 // Hash represents hash.
