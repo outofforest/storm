@@ -10,9 +10,6 @@ const (
 
 	// HashSize is the size of the hash used in tree.
 	HashSize = sha256.Size
-
-	// PointersPerBlockShift is set to number of bits used by PointersPerBlock.
-	PointersPerBlockShift = 6
 )
 
 // BlockType is the enum representing the block type.

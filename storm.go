@@ -172,7 +172,7 @@ func lookupByKey[T blocks.Block](
 			}
 
 			pointerIndex := hopAddressing & (pointerV0.PointersPerBlock - 1)
-			hopAddressing >>= blocks.PointersPerBlockShift
+			hopAddressing /= pointerV0.PointersPerBlock
 
 			currentPointedBlockType = pointerBlock.Block.PointedBlockTypes[pointerIndex]
 			currentPointer = pointerBlock.Block.Pointers[pointerIndex]
