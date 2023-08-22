@@ -23,7 +23,7 @@ type Block struct {
 	RootObjectsBlockType     blocks.BlockType
 	RootObjectsSchemaVersion blocks.SchemaVersion
 
-	NextObjectID blocks.ObjectID
+	LastObjectID blocks.ObjectID // 0 is reserved for empty slots
 
 	// TODO (wojciech): Replace with correct (de)allocation mechanism
 	LastAllocatedBlock blocks.BlockAddress
