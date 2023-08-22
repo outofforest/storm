@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"crypto/rand"
 	"io"
 	"testing"
 
@@ -286,4 +287,61 @@ func TestChecksumIsVerifiedWhenFetching(t *testing.T) {
 		Address: address,
 	})
 	requireT.NoError(err)
+}
+
+// paddedStruct is intentionally designed in a way causing padding
+type paddedStruct struct {
+	Field1 uint64
+	Field2 byte
+	Field3 uint64
+}
+
+func (p paddedStruct) ComputeChecksum() blocks.Hash {
+	return blocks.Checksum(photon.NewFromValue(&p).B)
+}
+
+func TestNewBlocksProduceConsistentHash(t *testing.T) {
+	requireT := require.New(t)
+
+	dev := memdev.New(devSize)
+	requireT.NoError(persistence.Initialize(dev, false))
+
+	store, err := persistence.OpenStore(dev)
+	requireT.NoError(err)
+
+	cache, err := New(store, cacheSize)
+	requireT.NoError(err)
+
+	// Randomize cached data to ensure that paddings in objects are correctly zeroed
+
+	randomizeCache(t, cache)
+
+	// Create and commit two identical block
+
+	newBlock1 := NewBlock[paddedStruct](cache)
+	newBlock1.Block.Field1 = 1
+	newBlock1.Block.Field2 = 0x02
+	newBlock1.Block.Field3 = 3
+	newBlock1, err = newBlock1.Commit()
+	requireT.NoError(err)
+
+	newBlock2 := NewBlock[paddedStruct](cache)
+	newBlock2.Block.Field1 = 1
+	newBlock2.Block.Field2 = 0x02
+	newBlock2.Block.Field3 = 3
+	newBlock2, err = newBlock2.Commit()
+	requireT.NoError(err)
+
+	// Content should match
+
+	requireT.Equal(newBlock1.block.B[CacheHeaderSize:], newBlock2.block.B[CacheHeaderSize:])
+}
+
+func randomizeCache(t *testing.T, c *Cache) {
+	_, err := rand.Read(c.data)
+	require.NoError(t, err)
+	for offset := int64(0); offset < cacheSize; offset += CachedBlockSize {
+		header := photon.NewFromBytes[header](c.data[offset:])
+		header.V.State = freeBlockState
+	}
 }
