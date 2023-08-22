@@ -9,6 +9,18 @@ import (
 	"github.com/outofforest/storm/blocks"
 )
 
+func TestPointersPerBlockIsAPowerOfTwo(t *testing.T) {
+	assertT := assert.New(t)
+
+	assertT.Greater(PointersPerBlock, 0)
+
+	ppb := PointersPerBlock
+	for ppb&1 == 0 {
+		ppb >>= 1
+	}
+	assertT.EqualValues(1, ppb)
+}
+
 func TestChecksum(t *testing.T) {
 	assertT := assert.New(t)
 
