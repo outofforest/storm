@@ -1,7 +1,7 @@
 package v0
 
 import (
-	"github.com/outofforest/photon"
+	"unsafe"
 
 	"github.com/outofforest/storm/blocks"
 )
@@ -14,10 +14,11 @@ type Object[T comparable] struct {
 
 // Block contains any data.
 type Block[T comparable] struct {
-	Data T
+	Data [blocks.BlockSize]byte
 }
 
 // ComputeChecksum computes checksum of the block.
 func (b Block[T]) ComputeChecksum() blocks.Hash {
-	return blocks.Checksum(photon.NewFromValue(&b).B)
+	itemSize := int64(unsafe.Sizeof(Object[T]{}))
+	return blocks.Checksum(b.Data[:blocks.BlockSize/itemSize*itemSize])
 }
