@@ -4,7 +4,7 @@ import (
 	"github.com/cespare/xxhash/v2"
 
 	"github.com/outofforest/storm/blocks"
-	dataV0 "github.com/outofforest/storm/blocks/data/v0"
+	objectlistV0 "github.com/outofforest/storm/blocks/objectlist/v0"
 	pointerV0 "github.com/outofforest/storm/blocks/pointer/v0"
 	"github.com/outofforest/storm/cache"
 	"github.com/outofforest/storm/persistence"
@@ -31,9 +31,9 @@ func New(dev persistence.Dev, cacheSize int64) (*Storm, error) {
 }
 
 // Get gets value for a key from the store.
-func (s *Storm) Get(key [32]byte) ([32]byte, bool, error) {
+func (s *Storm) Get(key [32]byte) (blocks.ObjectID, bool, error) {
 	sBlock := s.c.SingularityBlock()
-	dataBlockPath, exists, err := lookupByKey[dataV0.Block](
+	dataBlockPath, exists, err := lookupByKey[objectlistV0.Block](
 		s.c,
 		&sBlock.RootData,
 		&sBlock.RootDataBlockType,
@@ -43,34 +43,34 @@ func (s *Storm) Get(key [32]byte) ([32]byte, bool, error) {
 		key,
 	)
 	if !exists || err != nil {
-		return [32]byte{}, false, err
+		return 0, false, err
 	}
 
 	dataBlock := dataBlockPath.Leaf.Block
 
-	if dataBlock.RecordStates[0] == dataV0.FreeRecordState {
-		return [32]byte{}, false, nil
+	if dataBlock.States[0] == objectlistV0.FreeItemState {
+		return 0, false, nil
 	}
 
-	if hash := xxhash.Sum64(key[:]); dataBlock.RecordHashes[0] != hash {
-		return [32]byte{}, false, nil
+	if hash := xxhash.Sum64(key[:]); dataBlock.Hashes[0] != hash {
+		return 0, false, nil
 	}
 
-	record := dataBlock.Records[0]
+	link := dataBlock.Links[0]
 
-	if record.Key != key {
-		return [32]byte{}, false, nil
+	if link.Key != key {
+		return 0, false, nil
 	}
 
-	return record.Value, true, nil
+	return link.ObjectID, true, nil
 }
 
 // Set sets value for a key in the store.
-func (s *Storm) Set(key [32]byte, value [32]byte) error {
+func (s *Storm) Set(key [32]byte, objectID blocks.ObjectID) error {
 	// TODO (wojciech): Implement block splitting
 
 	sBlock := s.c.SingularityBlock()
-	dataBlockPath, _, err := lookupByKey[dataV0.Block](
+	dataBlockPath, _, err := lookupByKey[objectlistV0.Block](
 		s.c,
 		&sBlock.RootData,
 		&sBlock.RootDataBlockType,
@@ -85,12 +85,12 @@ func (s *Storm) Set(key [32]byte, value [32]byte) error {
 
 	// TODO (wojciech): Find correct record index
 
-	dataBlockPath.Leaf.Block.NUsedRecords = 1
-	dataBlockPath.Leaf.Block.RecordStates[0] = dataV0.DefinedRecordState
-	dataBlockPath.Leaf.Block.RecordHashes[0] = xxhash.Sum64(key[:])
-	dataBlockPath.Leaf.Block.Records[0] = dataV0.Record{
-		Key:   key,
-		Value: value,
+	dataBlockPath.Leaf.Block.NUsedItems = 1
+	dataBlockPath.Leaf.Block.States[0] = objectlistV0.DefinedItemState
+	dataBlockPath.Leaf.Block.Hashes[0] = xxhash.Sum64(key[:])
+	dataBlockPath.Leaf.Block.Links[0] = objectlistV0.Link{
+		Key:      key,
+		ObjectID: objectID,
 	}
 
 	_, err = dataBlockPath.Commit()

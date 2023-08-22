@@ -6,6 +6,8 @@ import (
 	"github.com/outofforest/storm/blocks"
 )
 
+// TODO (wojciech): Hash data separately
+
 // PointersPerBlock is the number of pointers in each pointer block.
 const PointersPerBlock = 64
 
