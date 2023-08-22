@@ -31,6 +31,7 @@ const (
 	SingularityV0 SchemaVersion = iota
 	PointerV0
 	ObjectListV0
+	BlobV0
 )
 
 // Hash represents hash.

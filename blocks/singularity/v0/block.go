@@ -19,6 +19,12 @@ type Block struct {
 	RootDataBlockType     blocks.BlockType
 	RootDataSchemaVersion blocks.SchemaVersion
 
+	RootObjects              pointerV0.Pointer
+	RootObjectsBlockType     blocks.BlockType
+	RootObjectsSchemaVersion blocks.SchemaVersion
+
+	NextObjectID blocks.ObjectID
+
 	// TODO (wojciech): Replace with correct (de)allocation mechanism
 	LastAllocatedBlock blocks.BlockAddress
 }
