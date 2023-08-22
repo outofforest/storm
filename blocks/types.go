@@ -41,3 +41,9 @@ type Hash [HashSize]byte
 
 // BlockAddress is the address (index or offset) of the block.
 type BlockAddress uint64
+
+// Block defines the constraint for generics using block types.
+type Block interface {
+	comparable
+	ComputeChecksum() Hash
+}

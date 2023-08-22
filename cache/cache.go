@@ -7,7 +7,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/outofforest/storm/blocks"
-	"github.com/outofforest/storm/blocks/constraint"
 	pointerV0 "github.com/outofforest/storm/blocks/pointer/v0"
 	singularityV0 "github.com/outofforest/storm/blocks/singularity/v0"
 	"github.com/outofforest/storm/persistence"
@@ -85,9 +84,9 @@ func (c *Cache) fetchBlock(
 	address blocks.BlockAddress,
 	nBytes int64,
 	expectedChecksum blocks.Hash,
-) (header, []byte, error) {
+) ([]byte, error) {
 	if address > c.singularityBlock.V.LastAllocatedBlock {
-		return header{}, nil, errors.Errorf("block %d does not exist", address)
+		return nil, errors.Errorf("block %d does not exist", address)
 	}
 
 	// TODO (wojciech): Implement open addressing
@@ -100,24 +99,24 @@ func (c *Cache) fetchBlock(
 			dataOffset := offset + CacheHeaderSize
 			blockBuffer := c.data[dataOffset : dataOffset+nBytes]
 			if err := c.store.ReadBlock(address, blockBuffer); err != nil {
-				return header{}, nil, err
+				return nil, err
 			}
 			if err := blocks.VerifyChecksum(address, blockBuffer, expectedChecksum); err != nil {
-				return header{}, nil, err
+				return nil, err
 			}
 			h.V.Address = address
 			h.V.State = fetchedBlockState
-			return *h.V, blockBuffer, nil
+			return c.data[offset : dataOffset+nBytes], nil
 		}
 		if h.V.Address == address {
-			return *h.V, c.data[offset+CacheHeaderSize : offset+CachedBlockSize], nil
+			return c.data[offset : offset+CacheHeaderSize+nBytes], nil
 		}
 	}
 
-	return header{}, nil, errors.New("cache space exhausted")
+	return nil, errors.New("cache space exhausted")
 }
 
-func (c *Cache) newBlock() (header, []byte, error) {
+func (c *Cache) newBlock(nBytes int64) ([]byte, error) {
 	// TODO (wojciech): Implement open addressing
 	// TODO (wojciech): Implement cache pruning if there is no free space
 	// TODO (wojciech): Implement serious free space allocation
@@ -128,68 +127,66 @@ func (c *Cache) newBlock() (header, []byte, error) {
 			c.singularityBlock.V.LastAllocatedBlock++
 			header.V.Address = c.singularityBlock.V.LastAllocatedBlock
 			header.V.State = newBlockState
-			return *header.V, c.data[offset+CacheHeaderSize : offset+CachedBlockSize], nil
+			return c.data[offset : offset+CacheHeaderSize+nBytes], nil
 		}
 	}
 
-	return header{}, nil, errors.New("cache space exhausted")
+	return nil, errors.New("cache space exhausted")
 }
 
 // CachedBlock represents state of the block stored in cache.
-type CachedBlock[T constraint.Block] struct {
-	cache  *Cache
-	header header
-	block  photon.Union[T]
-	Block  T
+type CachedBlock[T blocks.Block] struct {
+	cache *Cache
+	block photon.Union[block[T]]
+	Block T
 }
 
 // Address returns addrress of the block.
 func (cb CachedBlock[T]) Address() (blocks.BlockAddress, error) {
-	if cb.header.State == freeBlockState {
+	if cb.block.V == nil || cb.block.V.Header.State == freeBlockState {
 		return 0, errors.New("block hasn't been allocated yet")
 	}
 
-	return cb.header.Address, nil
+	return cb.block.V.Header.Address, nil
 }
 
 // Commit commits block changes to cache.
 func (cb CachedBlock[T]) Commit() (CachedBlock[T], error) {
-	if cb.header.State != newBlockState {
-		header, data, err := cb.cache.newBlock()
+	if cb.block.V == nil || cb.block.V.Header.State != newBlockState {
+		var v T
+		data, err := cb.cache.newBlock(int64(unsafe.Sizeof(v)))
 		if err != nil {
 			return CachedBlock[T]{}, err
 		}
-		cb.header = header
-		cb.block = photon.NewFromBytes[T](data)
+		cb.block = photon.NewFromBytes[block[T]](data)
 	}
 
-	*cb.block.V = cb.Block
+	cb.block.V.Block = cb.Block
 
 	return cb, nil
 }
 
 // FetchBlock returns structure representing existing block of particular type.
-func FetchBlock[T constraint.Block](
+func FetchBlock[T blocks.Block](
 	cache *Cache,
 	pointer pointerV0.Pointer,
 ) (CachedBlock[T], error) {
 	var v T
-	header, data, err := cache.fetchBlock(pointer.Address, int64(unsafe.Sizeof(v)), pointer.Checksum)
+	data, err := cache.fetchBlock(pointer.Address, int64(unsafe.Sizeof(v)), pointer.Checksum)
 	if err != nil {
 		return CachedBlock[T]{}, err
 	}
 
-	block := photon.NewFromBytes[T](data)
+	block := photon.NewFromBytes[block[T]](data)
 	return CachedBlock[T]{
-		cache:  cache,
-		header: header,
-		block:  block,
-		Block:  *block.V,
+		cache: cache,
+		block: block,
+		Block: block.V.Block,
 	}, nil
 }
 
 // NewBlock returns structure representing new block of particular type.
-func NewBlock[T constraint.Block](cache *Cache) CachedBlock[T] {
+func NewBlock[T blocks.Block](cache *Cache) CachedBlock[T] {
 	return CachedBlock[T]{
 		cache: cache,
 	}

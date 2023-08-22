@@ -118,8 +118,7 @@ func TestCommitNewBlock(t *testing.T) {
 	// Block is not allocated yet.
 
 	requireT.Equal(blocks.BlockAddress(1), cache.singularityBlock.V.LastAllocatedBlock)
-	requireT.Equal(blocks.BlockAddress(0), newBlock.header.Address)
-	requireT.Equal(freeBlockState, newBlock.header.State)
+	requireT.Nil(newBlock.block.V)
 
 	// Address method returns error
 
@@ -132,8 +131,8 @@ func TestCommitNewBlock(t *testing.T) {
 	newBlock, err = newBlock.Commit()
 	requireT.NoError(err)
 	requireT.Equal(blocks.BlockAddress(2), cache.singularityBlock.V.LastAllocatedBlock)
-	requireT.Equal(blocks.BlockAddress(2), newBlock.header.Address)
-	requireT.Equal(newBlockState, newBlock.header.State)
+	requireT.Equal(blocks.BlockAddress(2), newBlock.block.V.Header.Address)
+	requireT.Equal(newBlockState, newBlock.block.V.Header.State)
 
 	// Address method should work now
 
@@ -149,8 +148,8 @@ func TestCommitNewBlock(t *testing.T) {
 	})
 	requireT.NoError(err)
 	requireT.Equal(blocks.BlockAddress(21), block.Block.Pointers[pointerIndex].Address)
-	requireT.Equal(blocks.BlockAddress(2), block.header.Address)
-	requireT.Equal(newBlockState, block.header.State)
+	requireT.Equal(blocks.BlockAddress(2), block.block.V.Header.Address)
+	requireT.Equal(newBlockState, block.block.V.Header.State)
 
 	// Update block
 
@@ -161,8 +160,8 @@ func TestCommitNewBlock(t *testing.T) {
 	// No new block should be allocated
 
 	requireT.Equal(blocks.BlockAddress(2), cache.singularityBlock.V.LastAllocatedBlock)
-	requireT.Equal(blocks.BlockAddress(2), block.header.Address)
-	requireT.Equal(newBlockState, block.header.State)
+	requireT.Equal(blocks.BlockAddress(2), block.block.V.Header.Address)
+	requireT.Equal(newBlockState, block.block.V.Header.State)
 
 	// Nothing should be updated so far on dev
 
@@ -206,8 +205,8 @@ func TestCommitNewBlock(t *testing.T) {
 	})
 	requireT.NoError(err)
 	requireT.Equal(blocks.BlockAddress(22), block.Block.Pointers[pointerIndex].Address)
-	requireT.Equal(blocks.BlockAddress(2), block.header.Address)
-	requireT.Equal(fetchedBlockState, block.header.State)
+	requireT.Equal(blocks.BlockAddress(2), block.block.V.Header.Address)
+	requireT.Equal(fetchedBlockState, block.block.V.Header.State)
 
 	// Create new cache, read blocks and verify that new values are there
 
@@ -222,8 +221,8 @@ func TestCommitNewBlock(t *testing.T) {
 
 	requireT.Equal(blocks.BlockAddress(2), cache2.singularityBlock.V.LastAllocatedBlock)
 	requireT.Equal(blocks.BlockAddress(22), block.Block.Pointers[pointerIndex].Address)
-	requireT.Equal(fetchedBlockState, block.header.State)
-	requireT.Equal(blocks.BlockAddress(2), block.header.Address)
+	requireT.Equal(fetchedBlockState, block.block.V.Header.State)
+	requireT.Equal(blocks.BlockAddress(2), block.block.V.Header.Address)
 
 	// Updating fetched block should create a new one
 
@@ -231,8 +230,8 @@ func TestCommitNewBlock(t *testing.T) {
 	nextBlock, err := block.Commit()
 	requireT.NoError(err)
 	requireT.Equal(blocks.BlockAddress(3), cache2.singularityBlock.V.LastAllocatedBlock)
-	requireT.Equal(blocks.BlockAddress(3), nextBlock.header.Address)
-	requireT.Equal(newBlockState, nextBlock.header.State)
+	requireT.Equal(blocks.BlockAddress(3), nextBlock.block.V.Header.Address)
+	requireT.Equal(newBlockState, nextBlock.block.V.Header.State)
 }
 
 func TestChecksumIsVerifiedWhenFetching(t *testing.T) {
