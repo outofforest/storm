@@ -6,6 +6,8 @@ import (
 	"github.com/outofforest/storm/blocks"
 )
 
+// TODO (wojciech): Support variable-length keys
+
 // ItemsPerBlock is the number of object references stored in each block.
 const ItemsPerBlock = 16
 

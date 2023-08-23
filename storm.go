@@ -1,7 +1,10 @@
 package storm
 
 import (
+	"encoding/hex"
+
 	"github.com/cespare/xxhash/v2"
+	"github.com/pkg/errors"
 
 	"github.com/outofforest/storm/blocks"
 	objectlistV0 "github.com/outofforest/storm/blocks/objectlist/v0"
@@ -48,27 +51,29 @@ func (s *Storm) Get(key [32]byte) (blocks.ObjectID, bool, error) {
 
 	dataBlock := dataBlockPath.Leaf.Block
 
-	if dataBlock.States[0] == objectlistV0.FreeItemState {
-		return 0, false, nil
+	hash := xxhash.Sum64(key[:])
+	for i, index := 0, hash%objectlistV0.ItemsPerBlock; i < objectlistV0.ItemsPerBlock; i, index = i+1, (index+1)%objectlistV0.ItemsPerBlock {
+		if dataBlock.States[index] == objectlistV0.FreeItemState {
+			return 0, false, nil
+		}
+
+		if dataBlock.Hashes[index] != hash {
+			continue
+		}
+
+		link := dataBlock.Links[index]
+		if link.Key != key {
+			continue
+		}
+
+		return link.ObjectID, true, nil
 	}
 
-	if hash := xxhash.Sum64(key[:]); dataBlock.Hashes[0] != hash {
-		return 0, false, nil
-	}
-
-	link := dataBlock.Links[0]
-
-	if link.Key != key {
-		return 0, false, nil
-	}
-
-	return link.ObjectID, true, nil
+	return 0, false, nil
 }
 
 // Set sets value for a key in the store.
 func (s *Storm) Set(key [32]byte, objectID blocks.ObjectID) error {
-	// TODO (wojciech): Implement block splitting
-
 	sBlock := s.c.SingularityBlock()
 	dataBlockPath, _, err := lookupByKey[objectlistV0.Block](
 		s.c,
@@ -83,18 +88,31 @@ func (s *Storm) Set(key [32]byte, objectID blocks.ObjectID) error {
 		return err
 	}
 
-	// TODO (wojciech): Find correct record index
+	// TODO (wojciech): Implement better open addressing
 
-	dataBlockPath.Leaf.Block.NUsedItems = 1
-	dataBlockPath.Leaf.Block.States[0] = objectlistV0.DefinedItemState
-	dataBlockPath.Leaf.Block.Hashes[0] = xxhash.Sum64(key[:])
-	dataBlockPath.Leaf.Block.Links[0] = objectlistV0.Link{
-		Key:      key,
-		ObjectID: objectID,
+	hash := xxhash.Sum64(key[:])
+	for i, index := 0, hash%objectlistV0.ItemsPerBlock; i < objectlistV0.ItemsPerBlock; i, index = i+1, (index+1)%objectlistV0.ItemsPerBlock {
+		if dataBlockPath.Leaf.Block.States[index] == objectlistV0.DefinedItemState &&
+			(dataBlockPath.Leaf.Block.Hashes[index] != hash || dataBlockPath.Leaf.Block.Links[index].Key != key) {
+			continue
+		}
+
+		if dataBlockPath.Leaf.Block.States[index] == objectlistV0.FreeItemState {
+			dataBlockPath.Leaf.Block.NUsedItems++
+			dataBlockPath.Leaf.Block.States[index] = objectlistV0.DefinedItemState
+			dataBlockPath.Leaf.Block.Hashes[index] = hash
+			dataBlockPath.Leaf.Block.Links[index].Key = key
+		}
+		dataBlockPath.Leaf.Block.Links[index].ObjectID = objectID
+
+		_, err = dataBlockPath.Commit()
+		return err
 	}
 
-	_, err = dataBlockPath.Commit()
-	return err
+	// TODO (wojciech): Implement block splitting
+	// TODO (wojciech): Split block even before it is full (if height is less than maximum)
+
+	return errors.Errorf("cannot find non-coliding slot for key %s", hex.EncodeToString(key[:]))
 }
 
 // Delete deletes key from the store.
