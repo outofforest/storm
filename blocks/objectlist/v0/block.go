@@ -8,30 +8,37 @@ import (
 
 // TODO (wojciech): Support variable-length keys
 
-// ItemsPerBlock is the number of object references stored in each block.
-const ItemsPerBlock = 16
+// ChunksPerBlock is the number of chunks in the block.
+const (
+	ChunksPerBlock = 2427
+	ChunkSize      = 32
+	MaxKeyLength   = 255
+)
 
-// ItemState defines the state of the item.
-type ItemState byte
+// ChunkState defines the state of the chunk.
+type ChunkState byte
 
 // Item states.
 const (
-	FreeItemState ItemState = iota
-	DefinedItemState
+	FreeChunkState ChunkState = iota
+	DefinedChunkState
+	InvalidChunkState
 )
-
-// Link links key to the object ID.
-type Link struct {
-	Key      [32]byte
-	ObjectID blocks.ObjectID
-}
 
 // Block contains links to objects.
 type Block struct {
 	NUsedItems uint64
-	Links      [ItemsPerBlock]Link
-	Hashes     [ItemsPerBlock]uint64
-	States     [ItemsPerBlock]ItemState
+
+	Blob [ChunksPerBlock * ChunkSize]byte
+
+	KeyHashes          [ChunksPerBlock]uint64
+	ObjectLinks        [ChunksPerBlock]blocks.ObjectID
+	ChunkPointers      [ChunksPerBlock]uint16
+	NextChunkPointers  [ChunksPerBlock]uint16
+	ChunkPointerStates [ChunksPerBlock]ChunkState
+	KeyLengths         [ChunksPerBlock]uint8
+
+	FreeChunkIndex uint16
 }
 
 // ComputeChecksum computes checksum of the block.

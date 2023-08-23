@@ -1,6 +1,7 @@
 package storm
 
 import (
+	"bytes"
 	"encoding/hex"
 
 	"github.com/cespare/xxhash/v2"
@@ -34,7 +35,15 @@ func New(dev persistence.Dev, cacheSize int64) (*Storm, error) {
 }
 
 // Get gets value for a key from the store.
-func (s *Storm) Get(key [32]byte) (blocks.ObjectID, bool, error) {
+func (s *Storm) Get(key []byte) (blocks.ObjectID, bool, error) {
+	if len(key) == 0 {
+		return 0, false, errors.Errorf("key cannot be empty")
+	}
+	if len(key) > objectlistV0.MaxKeyLength {
+		return 0, false, errors.Errorf("maximum key length exceeded, maximum: %d, actual: %d", objectlistV0.MaxKeyLength, len(key))
+	}
+
+	keyHash := xxhash.Sum64(key)
 	sBlock := s.c.SingularityBlock()
 	dataBlockPath, exists, err := lookupByKey[objectlistV0.Block](
 		s.c,
@@ -43,37 +52,39 @@ func (s *Storm) Get(key [32]byte) (blocks.ObjectID, bool, error) {
 		&sBlock.RootDataSchemaVersion,
 		blocks.ObjectListV0,
 		false,
-		key,
+		keyHash,
 	)
 	if !exists || err != nil {
 		return 0, false, err
 	}
 
-	dataBlock := dataBlockPath.Leaf.Block
-
-	hash := xxhash.Sum64(key[:])
-	for i, index := 0, hash%objectlistV0.ItemsPerBlock; i < objectlistV0.ItemsPerBlock; i, index = i+1, (index+1)%objectlistV0.ItemsPerBlock {
-		if dataBlock.States[index] == objectlistV0.FreeItemState {
+	block := &dataBlockPath.Leaf.Block
+	for i, index := 0, keyHash%objectlistV0.ChunksPerBlock; i < objectlistV0.ChunksPerBlock; i, index = i+1, (index+1)%objectlistV0.ChunksPerBlock {
+		if block.ChunkPointerStates[index] == objectlistV0.FreeChunkState {
 			return 0, false, nil
 		}
-
-		if dataBlock.Hashes[index] != hash {
+		if block.ChunkPointerStates[index] == objectlistV0.InvalidChunkState {
 			continue
 		}
 
-		link := dataBlock.Links[index]
-		if link.Key != key {
-			continue
+		if verifyKey(key, keyHash, block, index) {
+			return block.ObjectLinks[index], true, nil
 		}
-
-		return link.ObjectID, true, nil
 	}
 
 	return 0, false, nil
 }
 
 // Set sets value for a key in the store.
-func (s *Storm) Set(key [32]byte, objectID blocks.ObjectID) error {
+func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
+	if len(key) == 0 {
+		return errors.Errorf("key cannot be empty")
+	}
+	if len(key) > objectlistV0.MaxKeyLength {
+		return errors.Errorf("maximum key length exceeded, maximum: %d, actual: %d", objectlistV0.MaxKeyLength, len(key))
+	}
+
+	keyHash := xxhash.Sum64(key)
 	sBlock := s.c.SingularityBlock()
 	dataBlockPath, _, err := lookupByKey[objectlistV0.Block](
 		s.c,
@@ -82,37 +93,74 @@ func (s *Storm) Set(key [32]byte, objectID blocks.ObjectID) error {
 		&sBlock.RootDataSchemaVersion,
 		blocks.ObjectListV0,
 		true,
-		key,
+		keyHash,
 	)
 	if err != nil {
 		return err
 	}
 
 	// TODO (wojciech): Implement better open addressing
+	// TODO (wojciech): Implement block splitting
+	// TODO (wojciech): Split block even before it is full (if height is less than maximum)
+	// TODO (wojciech): Splitting must be done in a way where it is guaranteed that at least one key of max length can be inserted
 
-	hash := xxhash.Sum64(key[:])
-	for i, index := 0, hash%objectlistV0.ItemsPerBlock; i < objectlistV0.ItemsPerBlock; i, index = i+1, (index+1)%objectlistV0.ItemsPerBlock {
-		if dataBlockPath.Leaf.Block.States[index] == objectlistV0.DefinedItemState &&
-			(dataBlockPath.Leaf.Block.Hashes[index] != hash || dataBlockPath.Leaf.Block.Links[index].Key != key) {
+	block := &dataBlockPath.Leaf.Block
+	if block.NUsedItems == 0 {
+		// In this case the list of free blocks must be initialized.
+		block.FreeChunkIndex = 0
+		for i := uint16(0); i < objectlistV0.ChunksPerBlock; i++ {
+			block.NextChunkPointers[i] = i + 1
+		}
+		// Indicator of the end of the sequence.
+		block.NextChunkPointers[objectlistV0.ChunksPerBlock-1] = objectlistV0.ChunksPerBlock - 1
+	}
+
+	for i, index := 0, keyHash%objectlistV0.ChunksPerBlock; i < objectlistV0.ChunksPerBlock; i, index = i+1, (index+1)%objectlistV0.ChunksPerBlock {
+		if block.ChunkPointerStates[index] == objectlistV0.InvalidChunkState {
+			continue
+		}
+		if block.ChunkPointerStates[index] == objectlistV0.DefinedChunkState && !verifyKey(key, keyHash, block, index) {
 			continue
 		}
 
-		if dataBlockPath.Leaf.Block.States[index] == objectlistV0.FreeItemState {
-			dataBlockPath.Leaf.Block.NUsedItems++
-			dataBlockPath.Leaf.Block.States[index] = objectlistV0.DefinedItemState
-			dataBlockPath.Leaf.Block.Hashes[index] = hash
-			dataBlockPath.Leaf.Block.Links[index].Key = key
+		if block.ChunkPointerStates[index] == objectlistV0.FreeChunkState {
+			nBlocksRequired := (uint64(len(key)) + objectlistV0.ChunkSize - 1) / objectlistV0.ChunkSize
+			if block.NUsedItems+nBlocksRequired > objectlistV0.ChunksPerBlock {
+				// At this point, if block hasn't been split before the for loop, it means that all the chunks
+				// are taken by keys producing the same hash, meaning that it's not possible to set the key.
+				return errors.New("block does not contain enough free chunks to add new key")
+			}
+
+			block.ChunkPointerStates[index] = objectlistV0.DefinedChunkState
+			block.ChunkPointers[index] = block.FreeChunkIndex
+			block.KeyHashes[index] = keyHash
+			block.KeyLengths[index] = uint8(len(key))
+
+			var lastChunkIndex uint16
+			keyToCopy := key
+			for len(keyToCopy) > 0 {
+				block.NUsedItems++
+				lastChunkIndex = block.FreeChunkIndex
+				block.FreeChunkIndex = block.NextChunkPointers[block.FreeChunkIndex]
+
+				// In case key is longer, this is the next chunk to use.
+				// In the other case it is set to the same index after the loop finishes to indicate the end of the sequence.
+				block.NextChunkPointers[lastChunkIndex] = block.FreeChunkIndex
+
+				chunkOffset := lastChunkIndex * objectlistV0.ChunkSize
+
+				nCopied := copy(block.Blob[chunkOffset:chunkOffset+objectlistV0.ChunkSize], keyToCopy)
+				keyToCopy = keyToCopy[nCopied:]
+			}
+			block.NextChunkPointers[lastChunkIndex] = lastChunkIndex // to indicate that this is the last block in the sequence
 		}
-		dataBlockPath.Leaf.Block.Links[index].ObjectID = objectID
+		block.ObjectLinks[index] = objectID
 
 		_, err = dataBlockPath.Commit()
 		return err
 	}
 
-	// TODO (wojciech): Implement block splitting
-	// TODO (wojciech): Split block even before it is full (if height is less than maximum)
-
-	return errors.Errorf("cannot find non-coliding slot for key %s", hex.EncodeToString(key[:]))
+	return errors.Errorf("cannot find non-coliding chunk for key %s", hex.EncodeToString(key))
 }
 
 // Delete deletes key from the store.
@@ -124,6 +172,27 @@ func (s *Storm) Delete(key [32]byte) error {
 // Commit commits cached changes to the device.
 func (s *Storm) Commit() error {
 	return s.c.Commit()
+}
+
+func verifyKey(key []byte, keyHash uint64, block *objectlistV0.Block, index uint64) bool {
+	if block.KeyHashes[index] != keyHash || block.KeyLengths[index] != uint8(len(key)) {
+		return false
+	}
+
+	chunkIndex := block.ChunkPointers[index]
+	for {
+		chunkOffset := chunkIndex * objectlistV0.ChunkSize
+		if block.NextChunkPointers[chunkIndex] == chunkIndex {
+			// This is the last chunk in the sequence.
+			return bytes.Equal(key, block.Blob[chunkOffset:chunkOffset+uint16(len(key))])
+		}
+
+		if !bytes.Equal(key[:objectlistV0.ChunkSize], block.Blob[chunkOffset:chunkOffset+objectlistV0.ChunkSize]) {
+			return false
+		}
+		key = key[objectlistV0.ChunkSize:]
+		chunkIndex = block.NextChunkPointers[chunkIndex]
+	}
 }
 
 type hop struct {
@@ -147,13 +216,12 @@ func lookupByKey[T blocks.Block](
 	rootBlockSchemaVersion *blocks.SchemaVersion,
 	leafSchemaVersion blocks.SchemaVersion,
 	createIfMissing bool,
-	key [32]byte,
+	keyHash uint64,
 ) (keyPath[T], bool, error) {
 	currentPointer := *rootPointer
 	currentPointedBlockType := *rootBlockType
 
-	hash := xxhash.Sum64(key[:])
-	hopAddressing := hash
+	hopAddressing := keyHash
 	hops := make([]hop, 0, 11)
 
 	for {
@@ -189,7 +257,7 @@ func lookupByKey[T blocks.Block](
 				return keyPath[T]{}, false, err
 			}
 
-			pointerIndex := hopAddressing & (pointerV0.PointersPerBlock - 1)
+			pointerIndex := hopAddressing % pointerV0.PointersPerBlock
 			hopAddressing /= pointerV0.PointersPerBlock
 
 			currentPointedBlockType = pointerBlock.Block.PointedBlockTypes[pointerIndex]
