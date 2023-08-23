@@ -20,7 +20,7 @@ type Cache struct {
 	size  int64
 	data  []byte
 
-	singularityBlock photon.Union[singularityV0.Block]
+	singularityBlock photon.Union[*singularityV0.Block]
 }
 
 // New creates new cache.
@@ -145,7 +145,7 @@ func (c *Cache) newBlock(nBytes int64) ([]byte, error) {
 // CachedBlock represents state of the block stored in cache.
 type CachedBlock[T blocks.Block] struct {
 	cache *Cache
-	block photon.Union[block[T]]
+	block photon.Union[*block[T]]
 	Block T
 }
 
