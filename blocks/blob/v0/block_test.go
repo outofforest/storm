@@ -2,8 +2,8 @@ package v0
 
 import (
 	"testing"
-	"unsafe"
 
+	"github.com/outofforest/photon"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -12,24 +12,24 @@ func TestMappingBlobToSlice(t *testing.T) {
 
 	block := Block[item]{}
 	checksum := block.ComputeChecksum()
-	items := mapToSlice[item](block.Data[:])
-	assertT.Len(items, 5461)
+	items := photon.NewSliceFromBytes[Object[item]](block.Data[:])
+	assertT.Len(items.V, 5461)
 
-	items[0].ObjectID = 1
-	items[0].Object.Field1 = 2
-	items[0].Object.Field2 = 0x03
+	items.V[0].ObjectID = 1
+	items.V[0].Object.Field1 = 2
+	items.V[0].Object.Field2 = 0x03
 
-	items[1].ObjectID = 4
-	items[1].Object.Field1 = 5
-	items[1].Object.Field2 = 0x06
+	items.V[1].ObjectID = 4
+	items.V[1].Object.Field1 = 5
+	items.V[1].Object.Field2 = 0x06
 
-	items[2].ObjectID = 7
-	items[2].Object.Field1 = 8
-	items[2].Object.Field2 = 0x09
+	items.V[2].ObjectID = 7
+	items.V[2].Object.Field1 = 8
+	items.V[2].Object.Field2 = 0x09
 
-	items[3].ObjectID = 10
-	items[3].Object.Field1 = 11
-	items[3].Object.Field2 = 0x0c
+	items.V[3].ObjectID = 10
+	items.V[3].Object.Field1 = 11
+	items.V[3].Object.Field2 = 0x0c
 
 	assertT.Equal([]byte{
 		0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
@@ -44,9 +44,4 @@ func TestMappingBlobToSlice(t *testing.T) {
 type item struct {
 	Field1 uint64
 	Field2 byte
-}
-
-func mapToSlice[T comparable](block []byte) []Object[T] {
-	// TODO (wojciech): move to photon
-	return unsafe.Slice((*Object[T])(unsafe.Pointer(&block[0])), int64(len(block))/int64(unsafe.Sizeof(Object[T]{})))
 }
