@@ -49,7 +49,7 @@ func (s *Storm) Get(key []byte) (blocks.ObjectID, bool, error) {
 
 	keyHash := xxhash.Sum64(key)
 	sBlock := s.c.SingularityBlock()
-	dataBlockPath, exists, err := lookupByKey[objectlistV0.Block](
+	dataBlockPath, exists, err := lookupByKeyHash[objectlistV0.Block](
 		s.c,
 		&sBlock.RootData,
 		&sBlock.RootDataBlockType,
@@ -90,7 +90,7 @@ func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
 
 	keyHash := xxhash.Sum64(key)
 	sBlock := s.c.SingularityBlock()
-	dataBlockPath, _, err := lookupByKey[objectlistV0.Block](
+	dataBlockPath, _, err := lookupByKeyHash[objectlistV0.Block](
 		s.c,
 		&sBlock.RootData,
 		&sBlock.RootDataBlockType,
@@ -109,14 +109,6 @@ func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
 	// TODO (wojciech): Splitting must be done in a way where it is guaranteed that at least one key of max length can be inserted
 
 	block := &dataBlockPath.Leaf.Block
-	if block.NUsedItems == 0 {
-		// In this case the list of free blocks must be initialized.
-		block.FreeChunkIndex = 0
-		for i := uint16(0); i < objectlistV0.ChunksPerBlock; i++ {
-			block.NextChunkPointers[i] = i + 1
-		}
-	}
-
 	if err := setObjectID(block, key, keyHash, objectID); err != nil {
 		return err
 	}
@@ -174,7 +166,7 @@ func ensureObjectID(
 	if block.ChunkPointerStates[index] == objectlistV0.DefinedChunkState {
 		return block.ObjectLinks[index], false, nil
 	}
-	if err := setKeyInChunk(block, index, key, keyHash); err != nil {
+	if err := setupChunk(block, index, key, keyHash); err != nil {
 		return 0, false, err
 	}
 
@@ -198,7 +190,7 @@ func setObjectID(
 	// If state is `DefinedChunkState` it means that key is already set in the right chunk
 	// and only new object ID must be set.
 	if block.ChunkPointerStates[index] != objectlistV0.DefinedChunkState {
-		if err := setKeyInChunk(block, index, key, keyHash); err != nil {
+		if err := setupChunk(block, index, key, keyHash); err != nil {
 			return err
 		}
 	}
@@ -207,7 +199,7 @@ func setObjectID(
 	return nil
 }
 
-func setKeyInChunk(
+func setupChunk(
 	block *objectlistV0.Block,
 	index uint16,
 	key []byte,
@@ -218,6 +210,14 @@ func setKeyInChunk(
 		// At this point, if block hasn't been split before, it means that all the chunks
 		// are taken by keys producing the same hash, meaning that it's not possible to set the key.
 		return errors.New("block does not contain enough free chunks to add new key")
+	}
+
+	if block.NUsedItems == 0 {
+		// In this case the list of free blocks must be initialized.
+		block.FreeChunkIndex = 0
+		for i := uint16(0); i < objectlistV0.ChunksPerBlock; i++ {
+			block.NextChunkPointers[i] = i + 1
+		}
 	}
 
 	block.ChunkPointerStates[index] = objectlistV0.DefinedChunkState
@@ -296,7 +296,7 @@ type keyPath[T blocks.Block] struct {
 	Leaf                   cache.CachedBlock[T]
 }
 
-func lookupByKey[T blocks.Block](
+func lookupByKeyHash[T blocks.Block](
 	c *cache.Cache,
 	rootPointer *pointerV0.Pointer,
 	rootBlockType *blocks.BlockType,
