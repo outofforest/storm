@@ -10,6 +10,7 @@ import (
 	"github.com/outofforest/storm/blocks"
 	objectlistV0 "github.com/outofforest/storm/blocks/objectlist/v0"
 	pointerV0 "github.com/outofforest/storm/blocks/pointer/v0"
+	singularityV0 "github.com/outofforest/storm/blocks/singularity/v0"
 	"github.com/outofforest/storm/cache"
 	"github.com/outofforest/storm/persistence"
 )
@@ -116,7 +117,7 @@ func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
 		}
 	}
 
-	if err := setKeyInObjectList(block, key, keyHash, objectID); err != nil {
+	if err := setObjectID(block, key, keyHash, objectID); err != nil {
 		return err
 	}
 
@@ -158,12 +159,101 @@ func verifyKey(key []byte, keyHash uint64, block *objectlistV0.Block, index uint
 	}
 }
 
-func setKeyInObjectList(
+//nolint:unused
+func ensureObjectID(
+	sBlock *singularityV0.Block,
+	block *objectlistV0.Block,
+	key []byte,
+	keyHash uint64,
+) (blocks.ObjectID, error) {
+	index, err := findChunkForKey(block, key, keyHash)
+	if err != nil {
+		return 0, err
+	}
+
+	if block.ChunkPointerStates[index] == objectlistV0.DefinedChunkState {
+		return block.ObjectLinks[index], nil
+	}
+	if err := setKeyInChunk(block, index, key, keyHash); err != nil {
+		return 0, err
+	}
+
+	block.ObjectLinks[index] = sBlock.NextObjectID
+	sBlock.NextObjectID++
+
+	return block.ObjectLinks[index], nil
+}
+
+func setObjectID(
 	block *objectlistV0.Block,
 	key []byte,
 	keyHash uint64,
 	objectID blocks.ObjectID,
 ) error {
+	index, err := findChunkForKey(block, key, keyHash)
+	if err != nil {
+		return err
+	}
+
+	// If state is `DefinedChunkState` it means that key is already set in the right chunk
+	// and only new object ID must be set.
+	if block.ChunkPointerStates[index] != objectlistV0.DefinedChunkState {
+		if err := setKeyInChunk(block, index, key, keyHash); err != nil {
+			return err
+		}
+	}
+	block.ObjectLinks[index] = objectID
+
+	return nil
+}
+
+func setKeyInChunk(
+	block *objectlistV0.Block,
+	index uint16,
+	key []byte,
+	keyHash uint64,
+) error {
+	nBlocksRequired := (uint16(len(key)) + objectlistV0.ChunkSize - 1) / objectlistV0.ChunkSize
+	if block.NUsedItems+nBlocksRequired > objectlistV0.ChunksPerBlock {
+		// At this point, if block hasn't been split before, it means that all the chunks
+		// are taken by keys producing the same hash, meaning that it's not possible to set the key.
+		return errors.New("block does not contain enough free chunks to add new key")
+	}
+
+	block.ChunkPointerStates[index] = objectlistV0.DefinedChunkState
+	block.ChunkPointers[index] = block.FreeChunkIndex
+	block.KeyHashes[index] = keyHash
+
+	var lastChunkIndex uint16
+	var nCopied int
+	keyToCopy := key
+	for len(keyToCopy) > 0 {
+		block.NUsedItems++
+		lastChunkIndex = block.FreeChunkIndex
+		block.FreeChunkIndex = block.NextChunkPointers[block.FreeChunkIndex]
+
+		// In case key is longer, this is the next chunk to use.
+		// In the other case it is set to the same index after the loop finishes to indicate the end of the sequence.
+		block.NextChunkPointers[lastChunkIndex] = block.FreeChunkIndex
+
+		chunkOffset := lastChunkIndex * objectlistV0.ChunkSize
+
+		nCopied = copy(block.Blob[chunkOffset:chunkOffset+objectlistV0.ChunkSize], keyToCopy)
+		keyToCopy = keyToCopy[nCopied:]
+	}
+
+	// If pointer is higher than `ChunksPerBlock` it means that this is the last chunk in the sequence
+	// and value (index - ChunksPerBlock) indicates the remaining length of the key to read from the last chunk.
+	block.NextChunkPointers[lastChunkIndex] = uint16(objectlistV0.ChunksPerBlock + nCopied)
+
+	return nil
+}
+
+func findChunkForKey(
+	block *objectlistV0.Block,
+	key []byte,
+	keyHash uint64,
+) (uint16, error) {
 	var invalidChunkFound bool
 	var invalidChunkIndex uint16
 	for i, index := 0, uint16(keyHash%objectlistV0.ChunksPerBlock); i < objectlistV0.ChunksPerBlock; i, index = i+1, (index+1)%objectlistV0.ChunksPerBlock {
@@ -181,48 +271,15 @@ func setKeyInObjectList(
 		}
 
 		if block.ChunkPointerStates[index] == objectlistV0.FreeChunkState {
-			nBlocksRequired := (uint16(len(key)) + objectlistV0.ChunkSize - 1) / objectlistV0.ChunkSize
-			if block.NUsedItems+nBlocksRequired > objectlistV0.ChunksPerBlock {
-				// At this point, if block hasn't been split before, it means that all the chunks
-				// are taken by keys producing the same hash, meaning that it's not possible to set the key.
-				return errors.New("block does not contain enough free chunks to add new key")
-			}
-
 			if invalidChunkFound {
-				index = invalidChunkIndex
+				return invalidChunkIndex, nil
 			}
 
-			block.ChunkPointerStates[index] = objectlistV0.DefinedChunkState
-			block.ChunkPointers[index] = block.FreeChunkIndex
-			block.KeyHashes[index] = keyHash
-
-			var lastChunkIndex uint16
-			var nCopied int
-			keyToCopy := key
-			for len(keyToCopy) > 0 {
-				block.NUsedItems++
-				lastChunkIndex = block.FreeChunkIndex
-				block.FreeChunkIndex = block.NextChunkPointers[block.FreeChunkIndex]
-
-				// In case key is longer, this is the next chunk to use.
-				// In the other case it is set to the same index after the loop finishes to indicate the end of the sequence.
-				block.NextChunkPointers[lastChunkIndex] = block.FreeChunkIndex
-
-				chunkOffset := lastChunkIndex * objectlistV0.ChunkSize
-
-				nCopied = copy(block.Blob[chunkOffset:chunkOffset+objectlistV0.ChunkSize], keyToCopy)
-				keyToCopy = keyToCopy[nCopied:]
-			}
-			// If pointer is higher than `ChunksPerBlock` it means that this is the last chunk in the sequence
-			// and value (index - ChunksPerBlock) indicates the remaining length of the key to read from the last chunk.
-			block.NextChunkPointers[lastChunkIndex] = uint16(objectlistV0.ChunksPerBlock + nCopied)
+			return index, nil
 		}
-		block.ObjectLinks[index] = objectID
-
-		return nil
 	}
 
-	return errors.Errorf("cannot find non-coliding chunk for key %s", hex.EncodeToString(key))
+	return 0, errors.Errorf("cannot find non-coliding chunk for key %s", hex.EncodeToString(key))
 }
 
 type hop struct {
