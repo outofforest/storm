@@ -10,9 +10,8 @@ import (
 
 // ChunksPerBlock is the number of chunks in the block.
 const (
-	ChunksPerBlock = 2427
+	ChunksPerBlock = 2472
 	ChunkSize      = 32
-	MaxKeyLength   = 255
 )
 
 // ChunkState defines the state of the chunk.
@@ -27,8 +26,6 @@ const (
 
 // Block contains links to objects.
 type Block struct {
-	NUsedItems uint64
-
 	Blob [ChunksPerBlock * ChunkSize]byte
 
 	KeyHashes          [ChunksPerBlock]uint64
@@ -36,8 +33,8 @@ type Block struct {
 	ChunkPointers      [ChunksPerBlock]uint16
 	NextChunkPointers  [ChunksPerBlock]uint16
 	ChunkPointerStates [ChunksPerBlock]ChunkState
-	KeyLengths         [ChunksPerBlock]uint8
 
+	NUsedItems     uint16
 	FreeChunkIndex uint16
 }
 
