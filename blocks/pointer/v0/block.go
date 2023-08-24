@@ -19,10 +19,11 @@ type Pointer struct {
 
 // Block is the block forming tree. It contains pointers to other blocks.
 type Block struct {
-	NUsedPointers        uint64
 	Pointers             [PointersPerBlock]Pointer
 	PointedBlockVersions [PointersPerBlock]blocks.SchemaVersion
 	PointedBlockTypes    [PointersPerBlock]blocks.BlockType
+
+	NUsedPointers uint16
 }
 
 // ComputeChecksum computes checksum of the block.

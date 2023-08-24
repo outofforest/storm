@@ -14,6 +14,9 @@ import (
 	"github.com/outofforest/storm/persistence"
 )
 
+// MaxKeyComponentLength specifies the maximum length of single key component.
+const MaxKeyComponentLength = 256
+
 // Storm represents the storm storage engine.
 type Storm struct {
 	c *cache.Cache
@@ -39,8 +42,8 @@ func (s *Storm) Get(key []byte) (blocks.ObjectID, bool, error) {
 	if len(key) == 0 {
 		return 0, false, errors.Errorf("key cannot be empty")
 	}
-	if len(key) > objectlistV0.MaxKeyLength {
-		return 0, false, errors.Errorf("maximum key length exceeded, maximum: %d, actual: %d", objectlistV0.MaxKeyLength, len(key))
+	if len(key) > MaxKeyComponentLength {
+		return 0, false, errors.Errorf("maximum key component length exceeded, maximum: %d, actual: %d", MaxKeyComponentLength, len(key))
 	}
 
 	keyHash := xxhash.Sum64(key)
@@ -80,8 +83,8 @@ func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
 	if len(key) == 0 {
 		return errors.Errorf("key cannot be empty")
 	}
-	if len(key) > objectlistV0.MaxKeyLength {
-		return errors.Errorf("maximum key length exceeded, maximum: %d, actual: %d", objectlistV0.MaxKeyLength, len(key))
+	if len(key) > MaxKeyComponentLength {
+		return errors.Errorf("maximum key component length exceeded, maximum: %d, actual: %d", MaxKeyComponentLength, len(key))
 	}
 
 	keyHash := xxhash.Sum64(key)
@@ -111,8 +114,6 @@ func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
 		for i := uint16(0); i < objectlistV0.ChunksPerBlock; i++ {
 			block.NextChunkPointers[i] = i + 1
 		}
-		// Indicator of the end of the sequence.
-		block.NextChunkPointers[objectlistV0.ChunksPerBlock-1] = objectlistV0.ChunksPerBlock - 1
 	}
 
 	for i, index := 0, keyHash%objectlistV0.ChunksPerBlock; i < objectlistV0.ChunksPerBlock; i, index = i+1, (index+1)%objectlistV0.ChunksPerBlock {
@@ -124,7 +125,7 @@ func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
 		}
 
 		if block.ChunkPointerStates[index] == objectlistV0.FreeChunkState {
-			nBlocksRequired := (uint64(len(key)) + objectlistV0.ChunkSize - 1) / objectlistV0.ChunkSize
+			nBlocksRequired := (uint16(len(key)) + objectlistV0.ChunkSize - 1) / objectlistV0.ChunkSize
 			if block.NUsedItems+nBlocksRequired > objectlistV0.ChunksPerBlock {
 				// At this point, if block hasn't been split before the for loop, it means that all the chunks
 				// are taken by keys producing the same hash, meaning that it's not possible to set the key.
@@ -134,9 +135,9 @@ func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
 			block.ChunkPointerStates[index] = objectlistV0.DefinedChunkState
 			block.ChunkPointers[index] = block.FreeChunkIndex
 			block.KeyHashes[index] = keyHash
-			block.KeyLengths[index] = uint8(len(key))
 
 			var lastChunkIndex uint16
+			var nCopied int
 			keyToCopy := key
 			for len(keyToCopy) > 0 {
 				block.NUsedItems++
@@ -149,10 +150,12 @@ func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
 
 				chunkOffset := lastChunkIndex * objectlistV0.ChunkSize
 
-				nCopied := copy(block.Blob[chunkOffset:chunkOffset+objectlistV0.ChunkSize], keyToCopy)
+				nCopied = copy(block.Blob[chunkOffset:chunkOffset+objectlistV0.ChunkSize], keyToCopy)
 				keyToCopy = keyToCopy[nCopied:]
 			}
-			block.NextChunkPointers[lastChunkIndex] = lastChunkIndex // to indicate that this is the last block in the sequence
+			// If pointer is higher than `ChunksPerBlock` it means that this is the last chunk in the sequence
+			// and value (index - ChunksPerBlock) indicates the remaining length of the key to read from the last chunk.
+			block.NextChunkPointers[lastChunkIndex] = uint16(objectlistV0.ChunksPerBlock + nCopied)
 		}
 		block.ObjectLinks[index] = objectID
 
@@ -175,23 +178,25 @@ func (s *Storm) Commit() error {
 }
 
 func verifyKey(key []byte, keyHash uint64, block *objectlistV0.Block, index uint64) bool {
-	if block.KeyHashes[index] != keyHash || block.KeyLengths[index] != uint8(len(key)) {
+	if block.KeyHashes[index] != keyHash {
 		return false
 	}
 
 	chunkIndex := block.ChunkPointers[index]
 	for {
 		chunkOffset := chunkIndex * objectlistV0.ChunkSize
-		if block.NextChunkPointers[chunkIndex] == chunkIndex {
+		nextChunkIndex := block.NextChunkPointers[chunkIndex]
+		if nextChunkIndex > objectlistV0.ChunksPerBlock {
 			// This is the last chunk in the sequence.
-			return bytes.Equal(key, block.Blob[chunkOffset:chunkOffset+uint16(len(key))])
+			remainingLength := nextChunkIndex - objectlistV0.ChunksPerBlock
+			return bytes.Equal(key, block.Blob[chunkOffset:chunkOffset+remainingLength])
 		}
 
 		if !bytes.Equal(key[:objectlistV0.ChunkSize], block.Blob[chunkOffset:chunkOffset+objectlistV0.ChunkSize]) {
 			return false
 		}
 		key = key[objectlistV0.ChunkSize:]
-		chunkIndex = block.NextChunkPointers[chunkIndex]
+		chunkIndex = nextChunkIndex
 	}
 }
 
