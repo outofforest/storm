@@ -62,7 +62,7 @@ func (s *Storm) Get(key []byte) (blocks.ObjectID, bool, error) {
 	}
 
 	block := &dataBlockPath.Leaf.Block
-	for i, index := 0, keyHash%objectlistV0.ChunksPerBlock; i < objectlistV0.ChunksPerBlock; i, index = i+1, (index+1)%objectlistV0.ChunksPerBlock {
+	for i, index := 0, uint16(keyHash%objectlistV0.ChunksPerBlock); i < objectlistV0.ChunksPerBlock; i, index = i+1, (index+1)%objectlistV0.ChunksPerBlock {
 		if block.ChunkPointerStates[index] == objectlistV0.FreeChunkState {
 			return 0, false, nil
 		}
@@ -116,20 +116,80 @@ func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
 		}
 	}
 
-	for i, index := 0, keyHash%objectlistV0.ChunksPerBlock; i < objectlistV0.ChunksPerBlock; i, index = i+1, (index+1)%objectlistV0.ChunksPerBlock {
-		if block.ChunkPointerStates[index] == objectlistV0.InvalidChunkState {
-			continue
+	if err := setKeyInObjectList(block, key, keyHash, objectID); err != nil {
+		return err
+	}
+
+	_, err = dataBlockPath.Commit()
+	return err
+}
+
+// Delete deletes key from the store.
+func (s *Storm) Delete(key [32]byte) error {
+	// TODO (wojciech): To be implemented
+	return nil
+}
+
+// Commit commits cached changes to the device.
+func (s *Storm) Commit() error {
+	return s.c.Commit()
+}
+
+func verifyKey(key []byte, keyHash uint64, block *objectlistV0.Block, index uint16) bool {
+	if block.KeyHashes[index] != keyHash {
+		return false
+	}
+
+	chunkIndex := block.ChunkPointers[index]
+	for {
+		chunkOffset := chunkIndex * objectlistV0.ChunkSize
+		nextChunkIndex := block.NextChunkPointers[chunkIndex]
+		if nextChunkIndex > objectlistV0.ChunksPerBlock {
+			// This is the last chunk in the sequence.
+			remainingLength := nextChunkIndex - objectlistV0.ChunksPerBlock
+			return bytes.Equal(key, block.Blob[chunkOffset:chunkOffset+remainingLength])
 		}
-		if block.ChunkPointerStates[index] == objectlistV0.DefinedChunkState && !verifyKey(key, keyHash, block, index) {
+
+		if !bytes.Equal(key[:objectlistV0.ChunkSize], block.Blob[chunkOffset:chunkOffset+objectlistV0.ChunkSize]) {
+			return false
+		}
+		key = key[objectlistV0.ChunkSize:]
+		chunkIndex = nextChunkIndex
+	}
+}
+
+func setKeyInObjectList(
+	block *objectlistV0.Block,
+	key []byte,
+	keyHash uint64,
+	objectID blocks.ObjectID,
+) error {
+	var invalidChunkFound bool
+	var invalidChunkIndex uint16
+	for i, index := 0, uint16(keyHash%objectlistV0.ChunksPerBlock); i < objectlistV0.ChunksPerBlock; i, index = i+1, (index+1)%objectlistV0.ChunksPerBlock {
+		switch block.ChunkPointerStates[index] {
+		case objectlistV0.DefinedChunkState:
+			if !verifyKey(key, keyHash, block, index) {
+				continue
+			}
+		case objectlistV0.InvalidChunkState:
+			if !invalidChunkFound {
+				invalidChunkFound = true
+				invalidChunkIndex = index
+			}
 			continue
 		}
 
 		if block.ChunkPointerStates[index] == objectlistV0.FreeChunkState {
 			nBlocksRequired := (uint16(len(key)) + objectlistV0.ChunkSize - 1) / objectlistV0.ChunkSize
 			if block.NUsedItems+nBlocksRequired > objectlistV0.ChunksPerBlock {
-				// At this point, if block hasn't been split before the for loop, it means that all the chunks
+				// At this point, if block hasn't been split before, it means that all the chunks
 				// are taken by keys producing the same hash, meaning that it's not possible to set the key.
 				return errors.New("block does not contain enough free chunks to add new key")
+			}
+
+			if invalidChunkFound {
+				index = invalidChunkIndex
 			}
 
 			block.ChunkPointerStates[index] = objectlistV0.DefinedChunkState
@@ -159,45 +219,10 @@ func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
 		}
 		block.ObjectLinks[index] = objectID
 
-		_, err = dataBlockPath.Commit()
-		return err
+		return nil
 	}
 
 	return errors.Errorf("cannot find non-coliding chunk for key %s", hex.EncodeToString(key))
-}
-
-// Delete deletes key from the store.
-func (s *Storm) Delete(key [32]byte) error {
-	// TODO (wojciech): To be implemented
-	return nil
-}
-
-// Commit commits cached changes to the device.
-func (s *Storm) Commit() error {
-	return s.c.Commit()
-}
-
-func verifyKey(key []byte, keyHash uint64, block *objectlistV0.Block, index uint64) bool {
-	if block.KeyHashes[index] != keyHash {
-		return false
-	}
-
-	chunkIndex := block.ChunkPointers[index]
-	for {
-		chunkOffset := chunkIndex * objectlistV0.ChunkSize
-		nextChunkIndex := block.NextChunkPointers[chunkIndex]
-		if nextChunkIndex > objectlistV0.ChunksPerBlock {
-			// This is the last chunk in the sequence.
-			remainingLength := nextChunkIndex - objectlistV0.ChunksPerBlock
-			return bytes.Equal(key, block.Blob[chunkOffset:chunkOffset+remainingLength])
-		}
-
-		if !bytes.Equal(key[:objectlistV0.ChunkSize], block.Blob[chunkOffset:chunkOffset+objectlistV0.ChunkSize]) {
-			return false
-		}
-		key = key[objectlistV0.ChunkSize:]
-		chunkIndex = nextChunkIndex
-	}
 }
 
 type hop struct {
