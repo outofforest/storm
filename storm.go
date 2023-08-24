@@ -15,9 +15,6 @@ import (
 	"github.com/outofforest/storm/persistence"
 )
 
-// MaxKeyComponentLength specifies the maximum length of single key component.
-const MaxKeyComponentLength = 256
-
 // Storm represents the storm storage engine.
 type Storm struct {
 	c *cache.Cache
@@ -43,8 +40,8 @@ func (s *Storm) Get(key []byte) (blocks.ObjectID, bool, error) {
 	if len(key) == 0 {
 		return 0, false, errors.Errorf("key cannot be empty")
 	}
-	if len(key) > MaxKeyComponentLength {
-		return 0, false, errors.Errorf("maximum key component length exceeded, maximum: %d, actual: %d", MaxKeyComponentLength, len(key))
+	if len(key) > objectlistV0.MaxKeyComponentLength {
+		return 0, false, errors.Errorf("maximum key component length exceeded, maximum: %d, actual: %d", objectlistV0.MaxKeyComponentLength, len(key))
 	}
 
 	keyHash := xxhash.Sum64(key)
@@ -63,19 +60,10 @@ func (s *Storm) Get(key []byte) (blocks.ObjectID, bool, error) {
 	}
 
 	block := &dataBlockPath.Leaf.Block
-	for i, index := 0, uint16(keyHash%objectlistV0.ChunksPerBlock); i < objectlistV0.ChunksPerBlock; i, index = i+1, (index+1)%objectlistV0.ChunksPerBlock {
-		if block.ChunkPointerStates[index] == objectlistV0.FreeChunkState {
-			return 0, false, nil
-		}
-		if block.ChunkPointerStates[index] == objectlistV0.InvalidChunkState {
-			continue
-		}
-
-		if verifyKey(key, keyHash, block, index) {
-			return block.ObjectLinks[index], true, nil
-		}
+	index, chunkFound := findChunkForKey(block, key, keyHash)
+	if chunkFound && block.ChunkPointerStates[index] == objectlistV0.DefinedChunkState {
+		return block.ObjectLinks[index], true, nil
 	}
-
 	return 0, false, nil
 }
 
@@ -84,8 +72,8 @@ func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
 	if len(key) == 0 {
 		return errors.Errorf("key cannot be empty")
 	}
-	if len(key) > MaxKeyComponentLength {
-		return errors.Errorf("maximum key component length exceeded, maximum: %d, actual: %d", MaxKeyComponentLength, len(key))
+	if len(key) > objectlistV0.MaxKeyComponentLength {
+		return errors.Errorf("maximum key component length exceeded, maximum: %d, actual: %d", objectlistV0.MaxKeyComponentLength, len(key))
 	}
 
 	keyHash := xxhash.Sum64(key)
@@ -104,11 +92,14 @@ func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
 	}
 
 	// TODO (wojciech): Implement better open addressing
-	// TODO (wojciech): Implement block splitting
-	// TODO (wojciech): Split block even before it is full (if height is less than maximum)
-	// TODO (wojciech): Splitting must be done in a way where it is guaranteed that at least one key of max length can be inserted
 
 	block := &dataBlockPath.Leaf.Block
+
+	//nolint:staticcheck
+	if block.NUsedItems >= objectlistV0.SplitTrigger {
+		// TODO (wojciech): Implement block splitting
+	}
+
 	if err := setObjectID(block, key, keyHash, objectID); err != nil {
 		return err
 	}
@@ -158,9 +149,9 @@ func ensureObjectID(
 	key []byte,
 	keyHash uint64,
 ) (blocks.ObjectID, bool, error) {
-	index, err := findChunkForKey(block, key, keyHash)
-	if err != nil {
-		return 0, false, err
+	index, chunkFound := findChunkForKey(block, key, keyHash)
+	if !chunkFound {
+		return 0, false, errors.Errorf("cannot find chunk for key %s", hex.EncodeToString(key))
 	}
 
 	if block.ChunkPointerStates[index] == objectlistV0.DefinedChunkState {
@@ -182,9 +173,9 @@ func setObjectID(
 	keyHash uint64,
 	objectID blocks.ObjectID,
 ) error {
-	index, err := findChunkForKey(block, key, keyHash)
-	if err != nil {
-		return err
+	index, chunkFound := findChunkForKey(block, key, keyHash)
+	if !chunkFound {
+		return errors.Errorf("cannot find chunk for key %s", hex.EncodeToString(key))
 	}
 
 	// If state is `DefinedChunkState` it means that key is already set in the right chunk
@@ -253,7 +244,7 @@ func findChunkForKey(
 	block *objectlistV0.Block,
 	key []byte,
 	keyHash uint64,
-) (uint16, error) {
+) (uint16, bool) {
 	var invalidChunkFound bool
 	var invalidChunkIndex uint16
 	for i, index := 0, uint16(keyHash%objectlistV0.ChunksPerBlock); i < objectlistV0.ChunksPerBlock; i, index = i+1, (index+1)%objectlistV0.ChunksPerBlock {
@@ -270,16 +261,14 @@ func findChunkForKey(
 			continue
 		}
 
-		if block.ChunkPointerStates[index] == objectlistV0.FreeChunkState {
-			if invalidChunkFound {
-				return invalidChunkIndex, nil
-			}
-
-			return index, nil
+		if block.ChunkPointerStates[index] == objectlistV0.FreeChunkState && invalidChunkFound {
+			return invalidChunkIndex, true
 		}
+
+		return index, true
 	}
 
-	return 0, errors.Errorf("cannot find non-coliding chunk for key %s", hex.EncodeToString(key))
+	return 0, false
 }
 
 type hop struct {
