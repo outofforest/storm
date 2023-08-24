@@ -10,8 +10,12 @@ import (
 
 // ChunksPerBlock is the number of chunks in the block.
 const (
-	ChunksPerBlock = 2472
-	ChunkSize      = 32
+	ChunksPerBlock        = 2472
+	ChunkSize             = 32
+	MaxKeyComponentLength = 256
+
+	// SplitTrigger value must be configured in a way that at least one key might be inserted after splitting.
+	SplitTrigger = ChunksPerBlock * 3 / 4
 )
 
 // ChunkState defines the state of the chunk.
