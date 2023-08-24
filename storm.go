@@ -44,23 +44,22 @@ func (s *Storm) Get(key []byte) (blocks.ObjectID, bool, error) {
 		return 0, false, errors.Errorf("maximum key component length exceeded, maximum: %d, actual: %d", objectlistV0.MaxKeyComponentLength, len(key))
 	}
 
-	keyHash := xxhash.Sum64(key)
 	sBlock := s.c.SingularityBlock()
-	dataBlockPath, exists, err := lookupByKeyHash[objectlistV0.Block](
+	dataBlockPath, hashReminder, exists, err := lookupByKeyHash[objectlistV0.Block](
 		s.c,
 		&sBlock.RootData,
 		&sBlock.RootDataBlockType,
 		&sBlock.RootDataSchemaVersion,
 		blocks.ObjectListV0,
 		false,
-		keyHash,
+		xxhash.Sum64(key),
 	)
 	if !exists || err != nil {
 		return 0, false, err
 	}
 
 	block := &dataBlockPath.Leaf.Block
-	index, chunkFound := findChunkForKey(block, key, keyHash)
+	index, chunkFound := findChunkForKey(block, key, hashReminder)
 	if chunkFound && block.ChunkPointerStates[index] == objectlistV0.DefinedChunkState {
 		return block.ObjectLinks[index], true, nil
 	}
@@ -76,16 +75,15 @@ func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
 		return errors.Errorf("maximum key component length exceeded, maximum: %d, actual: %d", objectlistV0.MaxKeyComponentLength, len(key))
 	}
 
-	keyHash := xxhash.Sum64(key)
 	sBlock := s.c.SingularityBlock()
-	dataBlockPath, _, err := lookupByKeyHash[objectlistV0.Block](
+	dataBlockPath, hashReminder, _, err := lookupByKeyHash[objectlistV0.Block](
 		s.c,
 		&sBlock.RootData,
 		&sBlock.RootDataBlockType,
 		&sBlock.RootDataSchemaVersion,
 		blocks.ObjectListV0,
 		true,
-		keyHash,
+		xxhash.Sum64(key),
 	)
 	if err != nil {
 		return err
@@ -100,7 +98,7 @@ func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
 		// TODO (wojciech): Implement block splitting
 	}
 
-	if err := setObjectID(block, key, keyHash, objectID); err != nil {
+	if err := setObjectID(block, key, hashReminder, objectID); err != nil {
 		return err
 	}
 
@@ -119,8 +117,8 @@ func (s *Storm) Commit() error {
 	return s.c.Commit()
 }
 
-func verifyKey(key []byte, keyHash uint64, block *objectlistV0.Block, index uint16) bool {
-	if block.KeyHashes[index] != keyHash {
+func verifyKey(key []byte, hashReminder uint64, block *objectlistV0.Block, index uint16) bool {
+	if block.KeyHashReminders[index] != hashReminder {
 		return false
 	}
 
@@ -147,9 +145,9 @@ func ensureObjectID(
 	sBlock *singularityV0.Block,
 	block *objectlistV0.Block,
 	key []byte,
-	keyHash uint64,
+	hashReminder uint64,
 ) (blocks.ObjectID, bool, error) {
-	index, chunkFound := findChunkForKey(block, key, keyHash)
+	index, chunkFound := findChunkForKey(block, key, hashReminder)
 	if !chunkFound {
 		return 0, false, errors.Errorf("cannot find chunk for key %s", hex.EncodeToString(key))
 	}
@@ -157,7 +155,7 @@ func ensureObjectID(
 	if block.ChunkPointerStates[index] == objectlistV0.DefinedChunkState {
 		return block.ObjectLinks[index], false, nil
 	}
-	if err := setupChunk(block, index, key, keyHash); err != nil {
+	if err := setupChunk(block, index, key, hashReminder); err != nil {
 		return 0, false, err
 	}
 
@@ -170,10 +168,10 @@ func ensureObjectID(
 func setObjectID(
 	block *objectlistV0.Block,
 	key []byte,
-	keyHash uint64,
+	hashReminder uint64,
 	objectID blocks.ObjectID,
 ) error {
-	index, chunkFound := findChunkForKey(block, key, keyHash)
+	index, chunkFound := findChunkForKey(block, key, hashReminder)
 	if !chunkFound {
 		return errors.Errorf("cannot find chunk for key %s", hex.EncodeToString(key))
 	}
@@ -181,7 +179,7 @@ func setObjectID(
 	// If state is `DefinedChunkState` it means that key is already set in the right chunk
 	// and only new object ID must be set.
 	if block.ChunkPointerStates[index] != objectlistV0.DefinedChunkState {
-		if err := setupChunk(block, index, key, keyHash); err != nil {
+		if err := setupChunk(block, index, key, hashReminder); err != nil {
 			return err
 		}
 	}
@@ -194,7 +192,7 @@ func setupChunk(
 	block *objectlistV0.Block,
 	index uint16,
 	key []byte,
-	keyHash uint64,
+	hashReminder uint64,
 ) error {
 	nBlocksRequired := (uint16(len(key)) + objectlistV0.ChunkSize - 1) / objectlistV0.ChunkSize
 	if block.NUsedItems+nBlocksRequired > objectlistV0.ChunksPerBlock {
@@ -213,7 +211,7 @@ func setupChunk(
 
 	block.ChunkPointerStates[index] = objectlistV0.DefinedChunkState
 	block.ChunkPointers[index] = block.FreeChunkIndex
-	block.KeyHashes[index] = keyHash
+	block.KeyHashReminders[index] = hashReminder
 
 	var lastChunkIndex uint16
 	var nCopied int
@@ -243,14 +241,14 @@ func setupChunk(
 func findChunkForKey(
 	block *objectlistV0.Block,
 	key []byte,
-	keyHash uint64,
+	hashReminder uint64,
 ) (uint16, bool) {
 	var invalidChunkFound bool
 	var invalidChunkIndex uint16
-	for i, index := 0, uint16(keyHash%objectlistV0.ChunksPerBlock); i < objectlistV0.ChunksPerBlock; i, index = i+1, (index+1)%objectlistV0.ChunksPerBlock {
+	for i, index := 0, uint16(hashReminder%objectlistV0.ChunksPerBlock); i < objectlistV0.ChunksPerBlock; i, index = i+1, (index+1)%objectlistV0.ChunksPerBlock {
 		switch block.ChunkPointerStates[index] {
 		case objectlistV0.DefinedChunkState:
-			if !verifyKey(key, keyHash, block, index) {
+			if !verifyKey(key, hashReminder, block, index) {
 				continue
 			}
 		case objectlistV0.InvalidChunkState:
@@ -293,11 +291,11 @@ func lookupByKeyHash[T blocks.Block](
 	leafSchemaVersion blocks.SchemaVersion,
 	createIfMissing bool,
 	keyHash uint64,
-) (keyPath[T], bool, error) {
+) (keyPath[T], uint64, bool, error) {
 	currentPointer := *rootPointer
 	currentPointedBlockType := *rootBlockType
 
-	hopAddressing := keyHash
+	hashReminder := keyHash
 	hops := make([]hop, 0, 11)
 
 	for {
@@ -311,13 +309,13 @@ func lookupByKeyHash[T blocks.Block](
 					leafSchemaVersion:      leafSchemaVersion,
 					hops:                   hops,
 					Leaf:                   cache.NewBlock[T](c),
-				}, true, nil
+				}, hashReminder, true, nil
 			}
-			return keyPath[T]{}, false, nil
+			return keyPath[T]{}, 0, false, nil
 		case blocks.LeafBlockType:
 			leafBlock, err := cache.FetchBlock[T](c, currentPointer)
 			if err != nil {
-				return keyPath[T]{}, false, err
+				return keyPath[T]{}, 0, false, err
 			}
 			return keyPath[T]{
 				rootPointer:            rootPointer,
@@ -326,15 +324,15 @@ func lookupByKeyHash[T blocks.Block](
 				leafSchemaVersion:      leafSchemaVersion,
 				hops:                   hops,
 				Leaf:                   leafBlock,
-			}, true, nil
+			}, hashReminder, true, nil
 		case blocks.PointerBlockType:
 			pointerBlock, err := cache.FetchBlock[pointerV0.Block](c, currentPointer)
 			if err != nil {
-				return keyPath[T]{}, false, err
+				return keyPath[T]{}, 0, false, err
 			}
 
-			pointerIndex := hopAddressing % pointerV0.PointersPerBlock
-			hopAddressing /= pointerV0.PointersPerBlock
+			pointerIndex := hashReminder % pointerV0.PointersPerBlock
+			hashReminder /= pointerV0.PointersPerBlock
 
 			currentPointedBlockType = pointerBlock.Block.PointedBlockTypes[pointerIndex]
 			currentPointer = pointerBlock.Block.Pointers[pointerIndex]
