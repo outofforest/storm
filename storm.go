@@ -165,23 +165,23 @@ func ensureObjectID(
 	block *objectlistV0.Block,
 	key []byte,
 	keyHash uint64,
-) (blocks.ObjectID, error) {
+) (blocks.ObjectID, bool, error) {
 	index, err := findChunkForKey(block, key, keyHash)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	if block.ChunkPointerStates[index] == objectlistV0.DefinedChunkState {
-		return block.ObjectLinks[index], nil
+		return block.ObjectLinks[index], false, nil
 	}
 	if err := setKeyInChunk(block, index, key, keyHash); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	block.ObjectLinks[index] = sBlock.NextObjectID
 	sBlock.NextObjectID++
 
-	return block.ObjectLinks[index], nil
+	return block.ObjectLinks[index], true, nil
 }
 
 func setObjectID(
