@@ -1,4 +1,4 @@
-package storm
+package keystore
 
 import (
 	"bytes"
@@ -12,31 +12,22 @@ import (
 	pointerV0 "github.com/outofforest/storm/blocks/pointer/v0"
 	singularityV0 "github.com/outofforest/storm/blocks/singularity/v0"
 	"github.com/outofforest/storm/cache"
-	"github.com/outofforest/storm/persistence"
 )
 
-// Storm represents the storm storage engine.
-type Storm struct {
+// Store represents the key store keeping the relation between keys and object IDs.
+type Store struct {
 	c *cache.Cache
 }
 
-// New returns new storm store.
-func New(dev persistence.Dev, cacheSize int64) (*Storm, error) {
-	store, err := persistence.OpenStore(dev)
-	if err != nil {
-		return nil, err
-	}
-	c, err := cache.New(store, cacheSize)
-	if err != nil {
-		return nil, err
-	}
-	return &Storm{
+// New returns new key store.
+func New(c *cache.Cache) (*Store, error) {
+	return &Store{
 		c: c,
 	}, nil
 }
 
-// Get gets value for a key from the store.
-func (s *Storm) Get(key []byte) (blocks.ObjectID, bool, error) {
+// GetObjectID returns existing object ID for key.
+func (s *Store) GetObjectID(key []byte) (blocks.ObjectID, bool, error) {
 	if len(key) == 0 {
 		return 0, false, errors.Errorf("key cannot be empty")
 	}
@@ -66,13 +57,13 @@ func (s *Storm) Get(key []byte) (blocks.ObjectID, bool, error) {
 	return 0, false, nil
 }
 
-// Set sets value for a key in the store.
-func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
+// EnsureObjectID returns object ID for key. If the object ID does not exist it is created.
+func (s *Store) EnsureObjectID(key []byte) (blocks.ObjectID, error) {
 	if len(key) == 0 {
-		return errors.Errorf("key cannot be empty")
+		return 0, errors.Errorf("key cannot be empty")
 	}
 	if len(key) > objectlistV0.MaxKeyComponentLength {
-		return errors.Errorf("maximum key component length exceeded, maximum: %d, actual: %d", objectlistV0.MaxKeyComponentLength, len(key))
+		return 0, errors.Errorf("maximum key component length exceeded, maximum: %d, actual: %d", objectlistV0.MaxKeyComponentLength, len(key))
 	}
 
 	sBlock := s.c.SingularityBlock()
@@ -86,7 +77,7 @@ func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
 		xxhash.Sum64(key),
 	)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// TODO (wojciech): Implement better open addressing
@@ -95,29 +86,28 @@ func (s *Storm) Set(key []byte, objectID blocks.ObjectID) error {
 		// TODO (wojciech): Check if split is possible - if all the keys have the same hash then it is not.
 		pointerBlock, leafBlock, leafSchemaVersion, err := splitBlock(&dataBlockPath.Leaf.Block, hashReminder, s.c)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		dataBlockPath = dataBlockPath.Split(pointerBlock, uint16(hashReminder%pointerV0.PointersPerBlock), leafBlock, leafSchemaVersion)
 		hashReminder /= pointerV0.PointersPerBlock
 	}
 
-	if err := setObjectID(&dataBlockPath.Leaf.Block, key, hashReminder, objectID); err != nil {
-		return err
+	objectID, created, err := ensureObjectID(sBlock, &dataBlockPath.Leaf.Block, key, hashReminder)
+	if err != nil {
+		return 0, err
 	}
-
-	_, err = dataBlockPath.Commit()
-	return err
+	if created {
+		if _, err := dataBlockPath.Commit(); err != nil {
+			return 0, err
+		}
+	}
+	return objectID, nil
 }
 
 // Delete deletes key from the store.
-func (s *Storm) Delete(key [32]byte) error {
+func (s *Store) Delete(key [32]byte) error {
 	// TODO (wojciech): To be implemented
 	return nil
-}
-
-// Commit commits cached changes to the device.
-func (s *Storm) Commit() error {
-	return s.c.Commit()
 }
 
 func verifyKey(key []byte, hashReminder uint64, block *objectlistV0.Block, index uint16) bool {
@@ -143,7 +133,6 @@ func verifyKey(key []byte, hashReminder uint64, block *objectlistV0.Block, index
 	}
 }
 
-//nolint:unused
 func ensureObjectID(
 	sBlock *singularityV0.Block,
 	block *objectlistV0.Block,
@@ -166,29 +155,6 @@ func ensureObjectID(
 	sBlock.NextObjectID++
 
 	return block.ObjectLinks[index], true, nil
-}
-
-func setObjectID(
-	block *objectlistV0.Block,
-	key []byte,
-	hashReminder uint64,
-	objectID blocks.ObjectID,
-) error {
-	index, chunkFound := findChunkForKey(block, key, hashReminder)
-	if !chunkFound {
-		return errors.Errorf("cannot find chunk for key %s", hex.EncodeToString(key))
-	}
-
-	// If state is `DefinedChunkState` it means that key is already set in the right chunk
-	// and only new object ID must be set.
-	if block.ChunkPointerStates[index] != objectlistV0.DefinedChunkState {
-		if err := setupChunk(block, index, key, hashReminder); err != nil {
-			return err
-		}
-	}
-	block.ObjectLinks[index] = objectID
-
-	return nil
 }
 
 func setupChunk(

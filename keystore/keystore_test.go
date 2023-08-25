@@ -1,4 +1,4 @@
-package storm
+package keystore
 
 import (
 	"crypto/rand"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/outofforest/storm/blocks"
 	objectlistV0 "github.com/outofforest/storm/blocks/objectlist/v0"
+	"github.com/outofforest/storm/cache"
 	"github.com/outofforest/storm/persistence"
 	"github.com/outofforest/storm/pkg/memdev"
 )
@@ -23,7 +24,13 @@ func TestSetGet(t *testing.T) {
 	dev := memdev.New(devSize)
 	requireT.NoError(persistence.Initialize(dev, false))
 
-	store, err := New(dev, cacheSize)
+	s, err := persistence.OpenStore(dev)
+	requireT.NoError(err)
+
+	c, err := cache.New(s, cacheSize)
+	requireT.NoError(err)
+
+	store, err := New(c)
 	requireT.NoError(err)
 
 	// Key intentionally takes 2.5 chunks.
@@ -34,29 +41,32 @@ func TestSetGet(t *testing.T) {
 		0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f,
 		0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f,
 	}
-	var value blocks.ObjectID = 4
 
 	// Set
 
-	requireT.NoError(store.Set(key, value))
-	requireT.NoError(store.Commit())
+	objectID, err := store.EnsureObjectID(key)
+	requireT.NoError(err)
+	requireT.NoError(c.Commit())
 
 	// Get from the same cache
 
-	value2, exists, err := store.Get(key)
+	objectID2, exists, err := store.GetObjectID(key)
 	requireT.NoError(err)
 	requireT.True(exists)
-	requireT.Equal(value, value2)
+	requireT.Equal(objectID, objectID2)
 
 	// Get from new cache
 
-	store2, err := New(dev, cacheSize)
+	c2, err := cache.New(s, cacheSize)
 	requireT.NoError(err)
 
-	value2, exists, err = store2.Get(key)
+	store2, err := New(c2)
+	requireT.NoError(err)
+
+	objectID2, exists, err = store2.GetObjectID(key)
 	requireT.NoError(err)
 	requireT.True(exists)
-	requireT.Equal(value, value2)
+	requireT.Equal(objectID, objectID2)
 }
 
 func TestSplit(t *testing.T) {
@@ -65,23 +75,43 @@ func TestSplit(t *testing.T) {
 	dev := memdev.New(devSize)
 	requireT.NoError(persistence.Initialize(dev, false))
 
-	store, err := New(dev, 100*1024*1024)
+	s, err := persistence.OpenStore(dev)
+	requireT.NoError(err)
+
+	c, err := cache.New(s, 100*1024*1024)
+	requireT.NoError(err)
+
+	store, err := New(c)
 	requireT.NoError(err)
 
 	keys := make([][48]byte, 50*objectlistV0.ChunksPerBlock)
-	values := make([]blocks.ObjectID, len(keys))
+	objectIDs := make([]blocks.ObjectID, 0, len(keys))
+
+	// Create key-objectID pairs
+
 	for i := 0; i < len(keys); i++ {
 		_, err := rand.Read(keys[i][:])
 		requireT.NoError(err)
-		values[i] = blocks.ObjectID(i + 1)
 
-		requireT.NoError(store.Set(keys[i][:], values[i]))
+		objectID, err := store.EnsureObjectID(keys[i][:])
+		requireT.NoError(err)
+		objectIDs = append(objectIDs, objectID)
 	}
 
+	// If the same key is ensured again, same ID should be returned
+
 	for i := 0; i < len(keys); i++ {
-		objectID, exists, err := store.Get(keys[i][:])
+		objectID, err := store.EnsureObjectID(keys[i][:])
+		requireT.NoError(err)
+		requireT.Equal(objectIDs[i], objectID)
+	}
+
+	// Get object IDs
+
+	for i := 0; i < len(keys); i++ {
+		objectID, exists, err := store.GetObjectID(keys[i][:])
 		requireT.NoError(err)
 		requireT.True(exists, i)
-		requireT.Equal(values[i], objectID)
+		requireT.Equal(objectIDs[i], objectID)
 	}
 }
