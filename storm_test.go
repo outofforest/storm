@@ -65,10 +65,10 @@ func TestSplit(t *testing.T) {
 	dev := memdev.New(devSize)
 	requireT.NoError(persistence.Initialize(dev, false))
 
-	store, err := New(dev, 400*1024*1024)
+	store, err := New(dev, 100*1024*1024)
 	requireT.NoError(err)
 
-	keys := make([][48]byte, 10*objectlistV0.ChunksPerBlock)
+	keys := make([][48]byte, 50*objectlistV0.ChunksPerBlock)
 	values := make([]blocks.ObjectID, len(keys))
 	for i := 0; i < len(keys); i++ {
 		_, err := rand.Read(keys[i][:])

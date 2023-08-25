@@ -6,12 +6,11 @@ import (
 	"github.com/outofforest/storm/blocks"
 )
 
-// TODO (wojciech): Support variable-length keys
-
-// ChunksPerBlock is the number of chunks in the block.
 const (
-	ChunksPerBlock        = 2472
-	ChunkSize             = 32
+	// ChunkSize is the size of the data chunk addressed by single slot.
+	ChunkSize = 32
+
+	// MaxKeyComponentLength is the maximum length of one key component.
 	MaxKeyComponentLength = 256
 
 	// SplitTrigger value must be configured in a way that at least one key might be inserted after splitting.
