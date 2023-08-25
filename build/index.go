@@ -12,4 +12,5 @@ var Commands = map[string]build.Command{
 
 func init() {
 	buildgo.AddCommands(Commands)
+	Commands["dev/test"] = build.Command{Fn: goTests, Description: "Runs go unit tests"}
 }

@@ -8,9 +8,6 @@ import (
 
 // TODO (wojciech): Hash data separately
 
-// PointersPerBlock is the number of pointers in each pointer block.
-const PointersPerBlock = 3048
-
 // Pointer is a pointer to other block.
 type Pointer struct {
 	Checksum blocks.Hash
