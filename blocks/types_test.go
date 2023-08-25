@@ -1,6 +1,7 @@
 package blocks_test
 
 import (
+	"reflect"
 	"testing"
 	"unsafe"
 
@@ -22,5 +23,6 @@ func TestBlockSizes(t *testing.T) {
 
 func assertDiskSize[T blocks.Block](t *testing.T) {
 	var b T
-	assert.LessOrEqualf(t, uint64(unsafe.Sizeof(b)), uint64(blocks.BlockSize), "Type: %T", b)
+	bt := reflect.TypeOf(b)
+	assert.LessOrEqualf(t, uint64(unsafe.Sizeof(b)), uint64(blocks.BlockSize), "Type: %s/%s", bt.PkgPath(), bt.Name())
 }
