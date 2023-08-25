@@ -32,7 +32,7 @@ func New(store *persistence.Store, size int64) (*Cache, error) {
 
 	return &Cache{
 		store:            store,
-		size:             size,
+		size:             size / CachedBlockSize * CachedBlockSize,
 		data:             make([]byte, size),
 		singularityBlock: sBlock,
 	}, nil

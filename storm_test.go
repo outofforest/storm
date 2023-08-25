@@ -1,11 +1,13 @@
 package storm
 
 import (
+	"crypto/rand"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/outofforest/storm/blocks"
+	objectlistV0 "github.com/outofforest/storm/blocks/objectlist/v0"
 	"github.com/outofforest/storm/persistence"
 	"github.com/outofforest/storm/pkg/memdev"
 )
@@ -55,4 +57,31 @@ func TestSetGet(t *testing.T) {
 	requireT.NoError(err)
 	requireT.True(exists)
 	requireT.Equal(value, value2)
+}
+
+func TestSplit(t *testing.T) {
+	requireT := require.New(t)
+
+	dev := memdev.New(devSize)
+	requireT.NoError(persistence.Initialize(dev, false))
+
+	store, err := New(dev, 400*1024*1024)
+	requireT.NoError(err)
+
+	keys := make([][48]byte, 10*objectlistV0.ChunksPerBlock)
+	values := make([]blocks.ObjectID, len(keys))
+	for i := 0; i < len(keys); i++ {
+		_, err := rand.Read(keys[i][:])
+		requireT.NoError(err)
+		values[i] = blocks.ObjectID(i + 1)
+
+		requireT.NoError(store.Set(keys[i][:], values[i]))
+	}
+
+	for i := 0; i < len(keys); i++ {
+		objectID, exists, err := store.Get(keys[i][:])
+		requireT.NoError(err)
+		requireT.True(exists, i)
+		requireT.Equal(values[i], objectID)
+	}
 }

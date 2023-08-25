@@ -38,7 +38,7 @@ type Block struct {
 	NextChunkPointers  [ChunksPerBlock]uint16
 	ChunkPointerStates [ChunksPerBlock]ChunkState
 
-	NUsedItems     uint16
+	NUsedChunks    uint16
 	FreeChunkIndex uint16
 }
 
