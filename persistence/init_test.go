@@ -32,7 +32,7 @@ func TestInit(t *testing.T) {
 	requireT.EqualValues(0, sBlock.V.Revision)
 	requireT.EqualValues(dev.Size()/blocks.BlockSize, int64(sBlock.V.NBlocks))
 	requireT.Less(dev.Size(), int64(sBlock.V.NBlocks+1)*blocks.BlockSize)
-	requireT.EqualValues(1, sBlock.V.LastAllocatedBlock)
+	requireT.EqualValues(0, sBlock.V.LastAllocatedBlock)
 	requireT.EqualValues(0, sBlock.V.RootData.Address)
 	requireT.EqualValues(blocks.FreeBlockType, sBlock.V.RootDataBlockType)
 	requireT.Equal(sBlock.V.ComputeChecksum(), sBlock.V.Checksum)

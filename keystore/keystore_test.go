@@ -72,13 +72,14 @@ func TestSetGet(t *testing.T) {
 func TestSplit(t *testing.T) {
 	requireT := require.New(t)
 
-	dev := memdev.New(devSize)
+	dev := memdev.New(300 * 1024 * 1024)
 	requireT.NoError(persistence.Initialize(dev, false))
 
 	s, err := persistence.OpenStore(dev)
 	requireT.NoError(err)
 
-	c, err := cache.New(s, 100*1024*1024)
+	// Cache is intentionally small to ensure that it behaves correctly when cached blocks are unloaded.
+	c, err := cache.New(s, 5*cache.CachedBlockSize)
 	requireT.NoError(err)
 
 	store, err := New(c)
@@ -98,6 +99,19 @@ func TestSplit(t *testing.T) {
 		objectIDs = append(objectIDs, objectID)
 	}
 
+	// Get object IDs
+
+	for i := 0; i < len(keys); i++ {
+		objectID, exists, err := store.GetObjectID(keys[i][:])
+		requireT.NoError(err)
+		requireT.True(exists, i)
+		requireT.Equal(objectIDs[i], objectID)
+	}
+
+	// Commit cache
+
+	requireT.NoError(c.Commit())
+
 	// If the same key is ensured again, same ID should be returned
 
 	for i := 0; i < len(keys); i++ {
@@ -106,12 +120,32 @@ func TestSplit(t *testing.T) {
 		requireT.Equal(objectIDs[i], objectID)
 	}
 
+	// Create new cache
+
+	c2, err := cache.New(s, 5*cache.CachedBlockSize)
+	requireT.NoError(err)
+
+	store, err = New(c2)
+	requireT.NoError(err)
+
 	// Get object IDs
 
 	for i := 0; i < len(keys); i++ {
 		objectID, exists, err := store.GetObjectID(keys[i][:])
 		requireT.NoError(err)
 		requireT.True(exists, i)
+		requireT.Equal(objectIDs[i], objectID)
+	}
+
+	// Commit cache
+
+	requireT.NoError(c.Commit())
+
+	// If the same key is ensured again, same ID should be returned
+
+	for i := 0; i < len(keys); i++ {
+		objectID, err := store.EnsureObjectID(keys[i][:])
+		requireT.NoError(err)
 		requireT.Equal(objectIDs[i], objectID)
 	}
 }
