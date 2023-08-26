@@ -42,10 +42,10 @@ func (s *Store) ReadBlock(address blocks.BlockAddress, p []byte) error {
 	}
 
 	if _, err := s.dev.Seek(int64(address)*blocks.BlockSize, io.SeekStart); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	if _, err := s.dev.Read(p); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	return nil
 }
@@ -57,17 +57,17 @@ func (s *Store) WriteBlock(address blocks.BlockAddress, p []byte) error {
 	}
 
 	if _, err := s.dev.Seek(int64(address)*blocks.BlockSize, io.SeekStart); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	if _, err := s.dev.Write(p); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	return nil
 }
 
 // Sync forces data to be written to the dev.
 func (s *Store) Sync() error {
-	return errors.WithStack(s.dev.Sync())
+	return s.dev.Sync()
 }
 
 func validateSingularityBlock(address blocks.BlockAddress, sBlock singularityV0.Block) error {

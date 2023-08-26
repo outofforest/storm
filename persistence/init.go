@@ -45,11 +45,11 @@ func Initialize(dev Dev, overwrite bool) error {
 	sBlock.V.Checksum = sBlock.V.ComputeChecksum()
 
 	if _, err := dev.Seek(0, io.SeekStart); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	if _, err := dev.Write(sBlock.B); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	// TODO (wojciech): After syncing, open dev using O_DIRECT option to verify that data have been written correctly.
@@ -80,12 +80,12 @@ func validateDev(dev Dev, overwrite bool) error {
 func loadSingularityBlock(dev Dev) (blocks.BlockAddress, singularityV0.Block, error) {
 	var address blocks.BlockAddress
 	if _, err := dev.Seek(int64(address)*blocks.BlockSize, io.SeekStart); err != nil {
-		return 0, singularityV0.Block{}, errors.WithStack(err)
+		return 0, singularityV0.Block{}, err
 	}
 
 	sBlock := photon.NewFromBytes[singularityV0.Block](make([]byte, blocks.BlockSize))
 	if _, err := dev.Read(sBlock.B); err != nil {
-		return 0, singularityV0.Block{}, errors.WithStack(err)
+		return 0, singularityV0.Block{}, err
 	}
 
 	return address, *sBlock.V, nil

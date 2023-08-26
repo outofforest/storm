@@ -79,7 +79,7 @@ func (md *MemDev) Sync() error {
 	return nil
 }
 
-// Size returns the byte size of the mem dev.
+// Size returns the byte size of the memdev.
 func (md *MemDev) Size() int64 {
 	return md.size
 }
