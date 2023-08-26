@@ -43,5 +43,5 @@ type dummyBlock struct {
 }
 
 func (b dummyBlock) ComputeChecksum() blocks.Hash {
-	return blocks.Hash{}
+	return 0
 }

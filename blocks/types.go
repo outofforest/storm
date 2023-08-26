@@ -1,16 +1,7 @@
 package blocks
 
-import (
-	"crypto/sha256"
-)
-
-const (
-	// BlockSize is the size of the data unit used by storm.
-	BlockSize int64 = 8 * 1024 // 8 KiB
-
-	// HashSize is the size of the hash used in tree.
-	HashSize = sha256.Size
-)
+// BlockSize is the size of the data unit used by storm.
+const BlockSize int64 = 32 * 1024 // 8 KiB
 
 // BlockType is the enum representing the block type.
 type BlockType byte
@@ -35,7 +26,7 @@ const (
 )
 
 // Hash represents hash.
-type Hash [HashSize]byte
+type Hash uint64
 
 // BlockAddress is the address (index or offset) of the block.
 type BlockAddress uint64

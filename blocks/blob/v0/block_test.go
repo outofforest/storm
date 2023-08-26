@@ -13,7 +13,7 @@ func TestMappingBlobToSlice(t *testing.T) {
 	block := Block[item]{}
 	checksum := block.ComputeChecksum()
 	items := photon.NewSliceFromBytes[Object[item]](block.Data[:])
-	assertT.Len(items.V, 341)
+	assertT.Len(items.V, 1365)
 
 	items.V[0].ObjectID = 1
 	items.V[0].Object.Field1 = 2

@@ -1,7 +1,6 @@
 package v0
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,7 +14,7 @@ func TestChecksum(t *testing.T) {
 	pBlock := Block{}
 
 	pBlock2 := pBlock
-	pBlock2.Pointers[0].Checksum = blocks.Hash(bytes.Repeat([]byte{0x01}, blocks.HashSize))
+	pBlock2.Pointers[0].Checksum = 2
 	assertT.NotEqual(pBlock.ComputeChecksum(), pBlock2.ComputeChecksum())
 
 	pBlock3 := pBlock2
@@ -35,6 +34,6 @@ func TestChecksum(t *testing.T) {
 	assertT.NotEqual(pBlock5.ComputeChecksum(), pBlock6.ComputeChecksum())
 
 	pBlock7 := pBlock6
-	pBlock7.Pointers[2].Checksum = blocks.Hash(bytes.Repeat([]byte{0x04}, blocks.HashSize))
+	pBlock7.Pointers[2].Checksum = 4
 	assertT.NotEqual(pBlock6.ComputeChecksum(), pBlock7.ComputeChecksum())
 }

@@ -1,15 +1,13 @@
 package blocks
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-
+	"github.com/cespare/xxhash/v2"
 	"github.com/pkg/errors"
 )
 
 // Checksum computes checksum of bytes.
 func Checksum(b []byte) Hash {
-	return sha256.Sum256(b)
+	return Hash(xxhash.Sum64(b))
 }
 
 // VerifyChecksum verifies that checksum of provided data matches the expected one.
@@ -18,6 +16,6 @@ func VerifyChecksum(address BlockAddress, p []byte, expectedChecksum Hash) error
 	if checksum == expectedChecksum {
 		return nil
 	}
-	return errors.Errorf("checksum mismatch for block %d, computed: %s, expected: %s",
-		address, hex.EncodeToString(checksum[:]), hex.EncodeToString(expectedChecksum[:]))
+	return errors.Errorf("checksum mismatch for block %d, computed: %d, expected: %d",
+		address, checksum, expectedChecksum)
 }
