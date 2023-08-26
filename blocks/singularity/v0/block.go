@@ -31,6 +31,6 @@ type Block struct {
 
 // ComputeChecksum computes checksum of the block.
 func (b Block) ComputeChecksum() blocks.Hash {
-	b.Checksum = blocks.Hash{}
+	b.Checksum = 0
 	return blocks.Checksum(photon.NewFromValue(&b).B)
 }

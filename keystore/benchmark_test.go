@@ -2,13 +2,14 @@ package keystore
 
 import (
 	"crypto/rand"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/outofforest/storm/cache"
 	"github.com/outofforest/storm/persistence"
-	"github.com/outofforest/storm/pkg/memdev"
+	"github.com/outofforest/storm/pkg/filedev"
 )
 
 // go test -bench=. -cpuprofile profile.out -benchtime=2x
@@ -27,19 +28,19 @@ func BenchmarkKeystore(b *testing.B) {
 		requireT.NoError(err)
 	}
 
-	// f, err := os.OpenFile("/home/wojciech/testdev", os.O_RDWR, 0o600)
-	// requireT.NoError(err)
-	// defer f.Close()
+	f, err := os.OpenFile("/home/wojciech/testdev", os.O_RDWR, 0o600)
+	requireT.NoError(err)
+	defer f.Close()
 
-	dev := memdev.New(300 * 1024 * 1024)
-	// dev := filedev.New(f)
+	// dev := memdev.New(300 * 1024 * 1024)
+	dev := filedev.New(f)
 	for bi := 0; bi < b.N; bi++ {
 		requireT.NoError(persistence.Initialize(dev, true))
 
 		s, err := persistence.OpenStore(dev)
 		requireT.NoError(err)
 
-		c, err := cache.New(s, 300*1024*1024)
+		c, err := cache.New(s, 500*1024*1024)
 		requireT.NoError(err)
 
 		store, err := New(c)

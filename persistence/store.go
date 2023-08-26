@@ -76,6 +76,6 @@ func validateSingularityBlock(address blocks.BlockAddress, sBlock singularityV0.
 	}
 
 	sBlock2 := sBlock
-	sBlock2.Checksum = blocks.Hash{}
+	sBlock2.Checksum = 0
 	return blocks.VerifyChecksum(address, photon.NewFromValue(&sBlock2).B, sBlock.Checksum)
 }

@@ -6,7 +6,6 @@ import (
 	"github.com/outofforest/photon"
 	"github.com/stretchr/testify/require"
 
-	"github.com/outofforest/storm/blocks"
 	singularityV0 "github.com/outofforest/storm/blocks/singularity/v0"
 	"github.com/outofforest/storm/pkg/memdev"
 )
@@ -37,7 +36,7 @@ func TestInvalidChecksum(t *testing.T) {
 	sBlock := photon.NewFromValue(&singularityV0.Block{})
 	requireT.NoError(store.ReadBlock(0, sBlock.B))
 
-	sBlock.V.Checksum = blocks.Hash{}
+	sBlock.V.Checksum = 0
 	requireT.NoError(store.WriteBlock(0, sBlock.B))
 	requireT.NoError(store.Sync())
 
