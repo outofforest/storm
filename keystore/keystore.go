@@ -241,7 +241,7 @@ func initObjectList(block *objectlistV0.Block) {
 }
 
 func splitBlock(block *objectlistV0.Block, hashReminder uint64, c *cache.Cache) (pointerV0.Pointer, cache.CachedBlock[objectlistV0.Block], blocks.SchemaVersion, error) {
-	// TODO (wojciech): Find a way to allocate only the amount of blocks really needed
+	// TODO (wojciech): Find a way to allocate only the amount of blocks really needed. Benchmark spends significant time on it.
 	newPointerIndexes := make([]uint16, 0, pointerV0.PointersPerBlock)
 	newCachedBlocks := make([]cache.CachedBlock[objectlistV0.Block], 0, pointerV0.PointersPerBlock)
 	newBlocks := map[uint16]*objectlistV0.Block{}
