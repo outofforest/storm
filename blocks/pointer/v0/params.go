@@ -3,4 +3,4 @@
 package v0
 
 // PointersPerBlock is the number of pointers in each pointer block.
-const PointersPerBlock = 3048
+const PointersPerBlock = 150
