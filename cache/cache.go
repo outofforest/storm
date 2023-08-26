@@ -12,15 +12,14 @@ import (
 	"github.com/outofforest/storm/persistence"
 )
 
-const maxCacheTries = 5
-
 var zeroContent = make([]byte, blocks.BlockSize)
 
 // Cache caches blocks.
 type Cache struct {
-	store   *persistence.Store
-	nBlocks int64
-	data    []byte
+	store       *persistence.Store
+	nBlocks     int64
+	data        []byte
+	dirtyBlocks map[int64]struct{}
 
 	singularityBlock photon.Union[*singularityV0.Block]
 }
@@ -36,6 +35,7 @@ func New(store *persistence.Store, size int64) (*Cache, error) {
 		store:            store,
 		nBlocks:          size / CachedBlockSize,
 		data:             make([]byte, size),
+		dirtyBlocks:      make(map[int64]struct{}, MaxDirtyBlocks),
 		singularityBlock: sBlock,
 	}, nil
 }
@@ -47,20 +47,7 @@ func (c *Cache) SingularityBlock() *singularityV0.Block {
 
 // Commit commits changes to the device.
 func (c *Cache) Commit() error {
-	// TODO (wojciech): Maintain a list of new blocks to be committed.
-
-	for i := int64(0); i < c.nBlocks; i++ {
-		offset := i * CachedBlockSize
-		header := photon.NewFromBytes[header](c.data[offset:])
-		if header.V.State == newBlockState {
-			if err := c.store.WriteBlock(header.V.Address, c.data[offset+CacheHeaderSize:offset+CachedBlockSize]); err != nil {
-				return err
-			}
-			header.V.State = fetchedBlockState
-		}
-	}
-
-	if err := c.store.Sync(); err != nil {
+	if err := c.commitData(); err != nil {
 		return err
 	}
 
@@ -77,6 +64,25 @@ func (c *Cache) Commit() error {
 	}
 
 	// TODO (wojciech): Verify that singularity block is ok by reading it using O_DIRECT option
+
+	return nil
+}
+
+func (c *Cache) commitData() error {
+	for cacheAddress := range c.dirtyBlocks {
+		offset := cacheAddress * CachedBlockSize
+		header := photon.NewFromBytes[header](c.data[offset:])
+		if err := c.store.WriteBlock(header.V.Address, c.data[offset+CacheHeaderSize:offset+CachedBlockSize]); err != nil {
+			return err
+		}
+		header.V.State = fetchedBlockState
+	}
+
+	// This is intentionally done in separate loop to take advantage of the optimisation
+	// golang applies when seeing this code.
+	for cacheAddress := range c.dirtyBlocks {
+		delete(c.dirtyBlocks, cacheAddress)
+	}
 
 	return nil
 }
@@ -137,6 +143,14 @@ func (c *Cache) newBlock(nBytes int64) ([]byte, error) {
 	// This is done because memory used for padding in structs is not zeroed automatically,
 	// causing mismatch in hashes.
 	copy(c.data[dataOffset:dataOffset+nBytes], zeroContent)
+
+	if len(c.dirtyBlocks) >= MaxDirtyBlocks {
+		if err := c.commitData(); err != nil {
+			return nil, err
+		}
+	}
+	c.dirtyBlocks[cacheAddress] = struct{}{}
+
 	return c.data[offset : dataOffset+nBytes], nil
 }
 
@@ -149,7 +163,7 @@ func (c *Cache) findCachedBlock(address blocks.BlockAddress) (int64, error) {
 	var invalidCacheAddressFound bool
 
 	// Multiplying by 3 instead of 2 here is better, because it produces both even and odd addresses.
-	for i, cacheAddress := 0, selectedCacheAddress; i < maxCacheTries; i, cacheAddress = i+1, (cacheAddress*3)%c.nBlocks {
+	for i, cacheAddress := 0, selectedCacheAddress; i < MaxCacheTries; i, cacheAddress = i+1, (cacheAddress*3)%c.nBlocks {
 		offset := cacheAddress * CachedBlockSize
 		h := photon.NewFromBytes[header](c.data[offset:])
 
@@ -180,6 +194,7 @@ func (c *Cache) findCachedBlock(address blocks.BlockAddress) (int64, error) {
 		if err := c.store.WriteBlock(h.V.Address, c.data[dataOffset:dataOffset+blocks.BlockSize]); err != nil {
 			return 0, err
 		}
+		delete(c.dirtyBlocks, selectedCacheAddress)
 		h.V.State = invalidBlockState
 	case fetchedBlockState:
 		h.V.State = invalidBlockState
