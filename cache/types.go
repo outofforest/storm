@@ -22,7 +22,7 @@ const (
 	freeBlockState blockState = iota
 	fetchedBlockState
 	newBlockState
-	invalidBlockState //nolint:varcheck
+	invalidBlockState
 )
 
 // header stores the metadata of cached block.

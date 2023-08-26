@@ -38,10 +38,9 @@ func Initialize(dev Dev, overwrite bool) error {
 	}
 
 	sBlock := photon.NewFromValue(&singularityV0.Block{
-		SchemaVersion:      blocks.SingularityV0,
-		StormID:            rand.Uint64() | stormSubject,
-		NBlocks:            uint64(dev.Size() / blocks.BlockSize),
-		LastAllocatedBlock: 1,
+		SchemaVersion: blocks.SingularityV0,
+		StormID:       rand.Uint64() | stormSubject,
+		NBlocks:       uint64(dev.Size() / blocks.BlockSize),
 	})
 	sBlock.V.Checksum = sBlock.V.ComputeChecksum()
 
@@ -50,10 +49,6 @@ func Initialize(dev Dev, overwrite bool) error {
 	}
 
 	if _, err := dev.Write(sBlock.B); err != nil {
-		return errors.WithStack(err)
-	}
-
-	if _, err := dev.Seek(blocks.BlockSize, io.SeekStart); err != nil {
 		return errors.WithStack(err)
 	}
 

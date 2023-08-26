@@ -12,13 +12,15 @@ import (
 	"github.com/outofforest/storm/persistence"
 )
 
-var zeroContent = make([]byte, CachedBlockSize)
+const maxCacheTries = 5
+
+var zeroContent = make([]byte, blocks.BlockSize)
 
 // Cache caches blocks.
 type Cache struct {
-	store *persistence.Store
-	size  int64
-	data  []byte
+	store   *persistence.Store
+	nBlocks int64
+	data    []byte
 
 	singularityBlock photon.Union[*singularityV0.Block]
 }
@@ -32,7 +34,7 @@ func New(store *persistence.Store, size int64) (*Cache, error) {
 
 	return &Cache{
 		store:            store,
-		size:             size / CachedBlockSize * CachedBlockSize,
+		nBlocks:          size / CachedBlockSize,
 		data:             make([]byte, size),
 		singularityBlock: sBlock,
 	}, nil
@@ -45,14 +47,11 @@ func (c *Cache) SingularityBlock() *singularityV0.Block {
 
 // Commit commits changes to the device.
 func (c *Cache) Commit() error {
-	for offset := int64(0); offset < c.size; offset += CachedBlockSize {
+	// TODO (wojciech): Maintain a list of new blocks to be committed.
+
+	for i := int64(0); i < c.nBlocks; i++ {
+		offset := i * CachedBlockSize
 		header := photon.NewFromBytes[header](c.data[offset:])
-		if header.V.State == freeBlockState {
-			break
-		}
-
-		// TODO (wojciech): Update checksums
-
 		if header.V.State == newBlockState {
 			if err := c.store.WriteBlock(header.V.Address, c.data[offset+CacheHeaderSize:offset+CachedBlockSize]); err != nil {
 				return err
@@ -91,55 +90,102 @@ func (c *Cache) fetchBlock(
 		return nil, errors.Errorf("block %d does not exist", address)
 	}
 
-	// TODO (wojciech): Implement open addressing
-	// TODO (wojciech): Implement cache pruning if there is no free space
 	// TODO (wojciech): Implement marking blocks in cache as deleted to prune them first if space is needed
 
-	for offset := int64(0); offset < c.size; offset += CachedBlockSize {
-		h := photon.NewFromBytes[header](c.data[offset:])
-		if h.V.State == freeBlockState {
-			dataOffset := offset + CacheHeaderSize
-			blockBuffer := c.data[dataOffset : dataOffset+nBytes]
-			if err := c.store.ReadBlock(address, blockBuffer); err != nil {
-				return nil, err
-			}
-			if err := blocks.VerifyChecksum(address, blockBuffer, expectedChecksum); err != nil {
-				return nil, err
-			}
-			h.V.Address = address
-			h.V.State = fetchedBlockState
-			return c.data[offset : dataOffset+nBytes], nil
-		}
-		if h.V.Address == address {
-			return c.data[offset : offset+CacheHeaderSize+nBytes], nil
-		}
+	cacheAddress, err := c.findCachedBlock(address)
+	if err != nil {
+		return nil, err
 	}
 
-	return nil, errors.New("cache space exhausted")
+	offset := cacheAddress * CachedBlockSize
+	dataOffset := offset + CacheHeaderSize
+	blockBuffer := c.data[dataOffset : dataOffset+nBytes]
+
+	h := photon.NewFromBytes[header](c.data[offset:])
+	if h.V.State == fetchedBlockState || h.V.State == newBlockState {
+		return c.data[offset : dataOffset+nBytes], nil
+	}
+
+	h.V.Address = address
+	h.V.State = fetchedBlockState
+
+	if err := c.store.ReadBlock(address, blockBuffer); err != nil {
+		return nil, err
+	}
+	if err := blocks.VerifyChecksum(address, blockBuffer, expectedChecksum); err != nil {
+		return nil, err
+	}
+
+	return c.data[offset : dataOffset+nBytes], nil
 }
 
 func (c *Cache) newBlock(nBytes int64) ([]byte, error) {
-	// TODO (wojciech): Implement open addressing
-	// TODO (wojciech): Implement cache pruning if there is no free space
-	// TODO (wojciech): Implement serious free space allocation
+	address := c.singularityBlock.V.LastAllocatedBlock + 1
+	cacheAddress, err := c.findCachedBlock(address)
+	if err != nil {
+		return nil, err
+	}
+	c.singularityBlock.V.LastAllocatedBlock++
 
-	for offset := int64(0); offset < c.size; offset += CachedBlockSize {
-		header := photon.NewFromBytes[header](c.data[offset:])
-		if header.V.State == freeBlockState {
-			dataBuffer := c.data[offset : offset+CacheHeaderSize+nBytes]
+	offset := cacheAddress * CachedBlockSize
+	dataOffset := offset + CacheHeaderSize
 
-			// This is done because memory used for padding in structs is not zeroed automatically,
-			// causing mismatch in hashes.
-			copy(dataBuffer, zeroContent)
+	header := photon.NewFromBytes[header](c.data[offset:])
+	header.V.Address = address
+	header.V.State = newBlockState
 
-			c.singularityBlock.V.LastAllocatedBlock++
-			header.V.Address = c.singularityBlock.V.LastAllocatedBlock
-			header.V.State = newBlockState
-			return dataBuffer, nil
+	// This is done because memory used for padding in structs is not zeroed automatically,
+	// causing mismatch in hashes.
+	copy(c.data[dataOffset:dataOffset+nBytes], zeroContent)
+	return c.data[offset : dataOffset+nBytes], nil
+}
+
+func (c *Cache) findCachedBlock(address blocks.BlockAddress) (int64, error) {
+	// TODO (wojciech): Implement cache pruning based on hit metric
+
+	// For now, if there is no free space in cache found in `maxCacheTries` tries, the first tried block is replaced
+	// by the fetched one.
+	selectedCacheAddress := int64(address) % c.nBlocks
+	var invalidCacheAddressFound bool
+
+	// Multiplying by 3 instead of 2 here is better, because it produces both even and odd addresses.
+	for i, cacheAddress := 0, selectedCacheAddress; i < maxCacheTries; i, cacheAddress = i+1, (cacheAddress*3)%c.nBlocks {
+		offset := cacheAddress * CachedBlockSize
+		h := photon.NewFromBytes[header](c.data[offset:])
+
+		switch h.V.State {
+		case freeBlockState:
+			if invalidCacheAddressFound {
+				return selectedCacheAddress, nil
+			}
+			return cacheAddress, nil
+		case invalidBlockState:
+			if !invalidCacheAddressFound {
+				invalidCacheAddressFound = true
+				selectedCacheAddress = cacheAddress
+			}
+		case fetchedBlockState, newBlockState:
+			if h.V.Address == address {
+				return cacheAddress, nil
+			}
 		}
 	}
 
-	return nil, errors.New("cache space exhausted")
+	offset := selectedCacheAddress * CachedBlockSize
+	dataOffset := offset + CacheHeaderSize
+
+	h := photon.NewFromBytes[header](c.data[offset:])
+	switch h.V.State {
+	case newBlockState:
+		if err := c.store.WriteBlock(h.V.Address, c.data[dataOffset:dataOffset+blocks.BlockSize]); err != nil {
+			return 0, err
+		}
+		h.V.State = invalidBlockState
+	case fetchedBlockState:
+		h.V.State = invalidBlockState
+	}
+
+	return selectedCacheAddress, nil
 }
 
 // CachedBlock represents state of the block stored in cache.
