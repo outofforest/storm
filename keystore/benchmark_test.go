@@ -12,7 +12,7 @@ import (
 	"github.com/outofforest/storm/pkg/filedev"
 )
 
-// go test -bench=. -cpuprofile profile.out -benchtime=2x
+// go test -bench=. -run=^$ -cpuprofile profile.out -benchtime=5x
 // go tool pprof -http="localhost:8000" pprofbin ./profile.out
 
 func BenchmarkKeystore(b *testing.B) {
