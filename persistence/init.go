@@ -42,7 +42,7 @@ func Initialize(dev Dev, overwrite bool) error {
 		StormID:       rand.Uint64() | stormSubject,
 		NBlocks:       uint64(dev.Size() / blocks.BlockSize),
 	})
-	sBlock.V.Checksum = sBlock.V.ComputeChecksum()
+	sBlock.V.Checksum = blocks.BlockChecksum(sBlock.V)
 
 	if _, err := dev.Seek(0, io.SeekStart); err != nil {
 		return err

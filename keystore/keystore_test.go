@@ -79,21 +79,23 @@ func TestSplit(t *testing.T) {
 	requireT.NoError(err)
 
 	// Cache is intentionally small to ensure that it behaves correctly when cached blocks are unloaded.
-	c, err := cache.New(s, 5*cache.CachedBlockSize)
+	c, err := cache.New(s, 5*blocks.BlockSize)
 	requireT.NoError(err)
 
 	store, err := New(c)
 	requireT.NoError(err)
 
 	keys := make([][48]byte, 50*objectlistV0.ChunksPerBlock)
-	objectIDs := make([]blocks.ObjectID, 0, len(keys))
 
 	// Create key-objectID pairs
 
 	for i := 0; i < len(keys); i++ {
 		_, err := rand.Read(keys[i][:])
 		requireT.NoError(err)
+	}
+	objectIDs := make([]blocks.ObjectID, 0, len(keys))
 
+	for i := 0; i < len(keys); i++ {
 		objectID, err := store.EnsureObjectID(keys[i][:])
 		requireT.NoError(err)
 		objectIDs = append(objectIDs, objectID)
@@ -122,7 +124,7 @@ func TestSplit(t *testing.T) {
 
 	// Create new cache
 
-	c2, err := cache.New(s, 5*cache.CachedBlockSize)
+	c2, err := cache.New(s, 5*blocks.BlockSize)
 	requireT.NoError(err)
 
 	store, err = New(c2)

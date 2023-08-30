@@ -2,8 +2,14 @@ package blocks
 
 import (
 	"github.com/cespare/xxhash/v2"
+	"github.com/outofforest/photon"
 	"github.com/pkg/errors"
 )
+
+// BlockChecksum computes checksum of the block.
+func BlockChecksum[T Block](b *T) Hash {
+	return Checksum(photon.NewFromValue(b).B)
+}
 
 // Checksum computes checksum of bytes.
 func Checksum(b []byte) Hash {

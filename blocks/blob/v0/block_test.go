@@ -5,13 +5,15 @@ import (
 
 	"github.com/outofforest/photon"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/outofforest/storm/blocks"
 )
 
 func TestMappingBlobToSlice(t *testing.T) {
 	assertT := assert.New(t)
 
-	block := Block[item]{}
-	checksum := block.ComputeChecksum()
+	block := &Block[item]{}
+	checksum := blocks.BlockChecksum(block)
 	items := photon.NewSliceFromBytes[Object[item]](block.Data[:])
 	assertT.Len(items.V, 1365)
 
@@ -38,7 +40,7 @@ func TestMappingBlobToSlice(t *testing.T) {
 		0xa, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xb, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xc, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
 		block.Data[:96])
 
-	assertT.NotEqual(checksum, block.ComputeChecksum())
+	assertT.NotEqual(checksum, blocks.BlockChecksum(block))
 }
 
 type item struct {
