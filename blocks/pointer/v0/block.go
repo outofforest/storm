@@ -8,8 +8,9 @@ import (
 
 // Pointer is a pointer to other block.
 type Pointer struct {
-	Checksum blocks.Hash
-	Address  blocks.BlockAddress
+	Checksum      blocks.Hash
+	Address       blocks.BlockAddress
+	BirthRevision uint64
 }
 
 // Block is the block forming tree. It contains pointers to other blocks.

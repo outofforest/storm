@@ -97,6 +97,7 @@ func (c *Cache) commitData() error {
 
 func (c *Cache) fetchBlock(
 	address blocks.BlockAddress,
+	birthRevision uint64,
 	nBytes int64,
 	expectedChecksum blocks.Hash,
 ) (*block, error) {
@@ -124,15 +125,22 @@ func (c *Cache) fetchBlock(
 		return nil, err
 	}
 
+	// This means that block is freshly created but was written to persistent store due to lack of space in cache.
+	// In this is case it is marked as new to avoid useless copying.
+	if birthRevision > c.singularityBlock.V.Revision {
+		b.State = newBlockState
+	}
+
 	return b, nil
 }
 
 func (c *Cache) copyBlock(
 	address blocks.BlockAddress,
+	birthRevision uint64,
 	nBytes int64,
 	expectedChecksum blocks.Hash,
 ) (*block, error) {
-	b, err := c.fetchBlock(address, nBytes, expectedChecksum)
+	b, err := c.fetchBlock(address, birthRevision, nBytes, expectedChecksum)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +231,7 @@ func FetchBlock[T blocks.Block](
 	pointer pointerV0.Pointer,
 ) (*T, blocks.BlockAddress, error) {
 	var v T
-	block, err := cache.fetchBlock(pointer.Address, int64(unsafe.Sizeof(v)), pointer.Checksum)
+	block, err := cache.fetchBlock(pointer.Address, pointer.BirthRevision, int64(unsafe.Sizeof(v)), pointer.Checksum)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -237,7 +245,7 @@ func CopyBlock[T blocks.Block](
 	pointer pointerV0.Pointer,
 ) (*T, blocks.BlockAddress, error) {
 	var v T
-	block, err := cache.copyBlock(pointer.Address, int64(unsafe.Sizeof(v)), pointer.Checksum)
+	block, err := cache.copyBlock(pointer.Address, pointer.BirthRevision, int64(unsafe.Sizeof(v)), pointer.Checksum)
 	if err != nil {
 		return nil, 0, err
 	}
