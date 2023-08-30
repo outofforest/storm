@@ -245,6 +245,8 @@ func initObjectList(block *objectlistV0.Block) {
 }
 
 func splitBlock(block objectlistV0.Block, hashReminder uint64, c *cache.Cache) (pointerV0.Pointer, pointerV0.Pointer, blocks.SchemaVersion, error) {
+	birthRevision := c.SingularityBlock().Revision + 1
+
 	// Block representing the original hash reminder is created explicitly to be returned even if it's empty,
 	// because later new key is inserted into it.
 	returnedPointerIndex := uint16(hashReminder % pointerV0.PointersPerBlock)
@@ -260,8 +262,9 @@ func splitBlock(block objectlistV0.Block, hashReminder uint64, c *cache.Cache) (
 	pointerBlock.PointedBlockTypes[returnedPointerIndex] = blocks.LeafBlockType
 	pointerBlock.PointedBlockVersions[returnedPointerIndex] = blocks.ObjectListV0
 	pointerBlock.Pointers[returnedPointerIndex] = pointerV0.Pointer{
-		Address:  returnedBlockAddress,
-		Checksum: returnedBlockChecksum,
+		Address:       returnedBlockAddress,
+		Checksum:      returnedBlockChecksum,
+		BirthRevision: birthRevision,
 	}
 	pointerBlockChecksum := blocks.BlockChecksum(pointerBlock)
 	if err != nil {
@@ -302,8 +305,9 @@ func splitBlock(block objectlistV0.Block, hashReminder uint64, c *cache.Cache) (
 		}
 
 		pointerBlock, pointerBlockAddress, err = cache.CopyBlock[pointerV0.Block](c, pointerV0.Pointer{
-			Address:  pointerBlockAddress,
-			Checksum: pointerBlockChecksum,
+			Address:       pointerBlockAddress,
+			Checksum:      pointerBlockChecksum,
+			BirthRevision: birthRevision,
 		})
 		if err != nil {
 			return pointerV0.Pointer{}, pointerV0.Pointer{}, 0, err
@@ -315,18 +319,21 @@ func splitBlock(block objectlistV0.Block, hashReminder uint64, c *cache.Cache) (
 		pointerBlock.PointedBlockTypes[pointerIndex] = blocks.LeafBlockType
 		pointerBlock.PointedBlockVersions[pointerIndex] = blocks.ObjectListV0
 		pointerBlock.Pointers[pointerIndex] = pointerV0.Pointer{
-			Address:  newBlockAddress,
-			Checksum: newBlockChecksum,
+			Address:       newBlockAddress,
+			Checksum:      newBlockChecksum,
+			BirthRevision: birthRevision,
 		}
 		pointerBlockChecksum = blocks.BlockChecksum(pointerBlock)
 	}
 
 	return pointerV0.Pointer{
-			Address:  pointerBlockAddress,
-			Checksum: pointerBlockChecksum,
+			Address:       pointerBlockAddress,
+			Checksum:      pointerBlockChecksum,
+			BirthRevision: birthRevision,
 		}, pointerV0.Pointer{
-			Address:  returnedBlockAddress,
-			Checksum: returnedBlockChecksum,
+			Address:       returnedBlockAddress,
+			Checksum:      returnedBlockChecksum,
+			BirthRevision: birthRevision,
 		}, blocks.ObjectListV0, nil
 }
 
@@ -482,9 +489,12 @@ func (kp keyPath[T]) Split(
 }
 
 func (kp keyPath[T]) Commit() (*T, error) {
+	birthRevision := kp.c.SingularityBlock().Revision + 1
+
 	pointer := pointerV0.Pointer{
-		Address:  kp.leafAddress,
-		Checksum: blocks.BlockChecksum(kp.Leaf),
+		Address:       kp.leafAddress,
+		Checksum:      blocks.BlockChecksum(kp.Leaf),
+		BirthRevision: birthRevision,
 	}
 
 	if nHops := len(kp.hops); nHops > 0 {
@@ -510,8 +520,9 @@ func (kp keyPath[T]) Commit() (*T, error) {
 			hopBlock.Pointers[hopIndex] = pointer
 
 			pointer = pointerV0.Pointer{
-				Address:  address,
-				Checksum: blocks.BlockChecksum(hopBlock),
+				Address:       address,
+				Checksum:      blocks.BlockChecksum(hopBlock),
+				BirthRevision: birthRevision,
 			}
 		}
 
