@@ -34,7 +34,6 @@ type BlockAddress uint64
 // Block defines the constraint for generics using block types.
 type Block interface {
 	comparable
-	ComputeChecksum() Hash
 }
 
 // ObjectID is the ID of the object in storm.

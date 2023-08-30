@@ -1,8 +1,6 @@
 package v0
 
 import (
-	"github.com/outofforest/photon"
-
 	"github.com/outofforest/storm/blocks"
 )
 
@@ -39,9 +37,4 @@ type Block struct {
 
 	NUsedChunks    uint16
 	FreeChunkIndex uint16
-}
-
-// ComputeChecksum computes checksum of the block.
-func (b Block) ComputeChecksum() blocks.Hash {
-	return blocks.Checksum(photon.NewFromValue(&b).B)
 }

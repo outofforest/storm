@@ -6,6 +6,7 @@ import (
 	"github.com/outofforest/photon"
 	"github.com/stretchr/testify/require"
 
+	"github.com/outofforest/storm/blocks"
 	singularityV0 "github.com/outofforest/storm/blocks/singularity/v0"
 	"github.com/outofforest/storm/pkg/memdev"
 )
@@ -61,7 +62,7 @@ func TestInvalidBlockNumber(t *testing.T) {
 	requireT.NoError(store.ReadBlock(0, sBlock.B))
 
 	sBlock.V.NBlocks++
-	sBlock.V.Checksum = sBlock.V.ComputeChecksum()
+	sBlock.V.Checksum = blocks.BlockChecksum(sBlock.V)
 	requireT.NoError(store.WriteBlock(0, sBlock.B))
 	requireT.NoError(store.Sync())
 
@@ -86,11 +87,12 @@ func TestExpandingDevWorks(t *testing.T) {
 	requireT.NoError(store.ReadBlock(0, sBlock.B))
 
 	sBlock.V.NBlocks--
-	sBlock.V.Checksum = sBlock.V.ComputeChecksum()
+	sBlock.V.Checksum = 0
+	sBlock.V.Checksum = blocks.BlockChecksum(sBlock.V)
 	requireT.NoError(store.WriteBlock(0, sBlock.B))
 	requireT.NoError(store.Sync())
 
-	// Opening new store should fail
+	// Opening new store should succeed
 
 	_, err = OpenStore(dev)
 	requireT.NoError(err)

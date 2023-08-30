@@ -27,6 +27,9 @@ func TestInit(t *testing.T) {
 	_, err = dev.Read(sBlock.B)
 	requireT.NoError(err)
 
+	checksum := sBlock.V.Checksum
+	sBlock.V.Checksum = 0
+
 	requireT.EqualValues(blocks.SingularityV0, sBlock.V.SchemaVersion)
 	requireT.EqualValues(stormSubject, sBlock.V.StormID&stormSubject)
 	requireT.EqualValues(0, sBlock.V.Revision)
@@ -35,7 +38,7 @@ func TestInit(t *testing.T) {
 	requireT.EqualValues(0, sBlock.V.LastAllocatedBlock)
 	requireT.EqualValues(0, sBlock.V.RootData.Address)
 	requireT.EqualValues(blocks.FreeBlockType, sBlock.V.RootDataBlockType)
-	requireT.Equal(sBlock.V.ComputeChecksum(), sBlock.V.Checksum)
+	requireT.Equal(blocks.BlockChecksum(sBlock.V), checksum)
 }
 
 func TestOverwrite(t *testing.T) {

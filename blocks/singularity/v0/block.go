@@ -1,8 +1,6 @@
 package v0
 
 import (
-	"github.com/outofforest/photon"
-
 	"github.com/outofforest/storm/blocks"
 	pointerV0 "github.com/outofforest/storm/blocks/pointer/v0"
 )
@@ -27,10 +25,4 @@ type Block struct {
 
 	// TODO (wojciech): Replace with correct (de)allocation mechanism
 	LastAllocatedBlock blocks.BlockAddress
-}
-
-// ComputeChecksum computes checksum of the block.
-func (b Block) ComputeChecksum() blocks.Hash {
-	b.Checksum = 0
-	return blocks.Checksum(photon.NewFromValue(&b).B)
 }

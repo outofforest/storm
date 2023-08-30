@@ -17,9 +17,10 @@ var zeroContent = make([]byte, blocks.BlockSize)
 // Cache caches blocks.
 type Cache struct {
 	store       *persistence.Store
-	nBlocks     int64
+	nBlocks     uint64
 	data        []byte
-	dirtyBlocks map[int64]struct{}
+	blocks      []block
+	dirtyBlocks map[uint64]struct{}
 
 	singularityBlock photon.Union[*singularityV0.Block]
 }
@@ -31,11 +32,18 @@ func New(store *persistence.Store, size int64) (*Cache, error) {
 		return nil, err
 	}
 
+	nBlocks := uint64(size) / uint64(blocks.BlockSize)
+	data := make([]byte, nBlocks*uint64(blocks.BlockSize))
+	bs := make([]block, nBlocks)
+	for i, offset := 0, int64(0); i < len(bs); i, offset = i+1, offset+blocks.BlockSize {
+		bs[i].Data = data[offset : offset+blocks.BlockSize]
+	}
 	return &Cache{
 		store:            store,
-		nBlocks:          size / CachedBlockSize,
-		data:             make([]byte, size),
-		dirtyBlocks:      make(map[int64]struct{}, MaxDirtyBlocks),
+		nBlocks:          nBlocks,
+		data:             data,
+		blocks:           bs,
+		dirtyBlocks:      make(map[uint64]struct{}, MaxDirtyBlocks),
 		singularityBlock: sBlock,
 	}, nil
 }
@@ -54,7 +62,8 @@ func (c *Cache) Commit() error {
 	// TODO (wojciech): Write each new version to rotating location
 
 	c.singularityBlock.V.Revision++
-	c.singularityBlock.V.Checksum = c.singularityBlock.V.ComputeChecksum()
+	c.singularityBlock.V.Checksum = 0
+	c.singularityBlock.V.Checksum = blocks.BlockChecksum(c.singularityBlock.V)
 	if err := c.store.WriteBlock(0, c.singularityBlock.B); err != nil {
 		return err
 	}
@@ -69,13 +78,12 @@ func (c *Cache) Commit() error {
 }
 
 func (c *Cache) commitData() error {
-	for cacheAddress := range c.dirtyBlocks {
-		offset := cacheAddress * CachedBlockSize
-		header := photon.NewFromBytes[header](c.data[offset:])
-		if err := c.store.WriteBlock(header.V.Address, c.data[offset+CacheHeaderSize:offset+CachedBlockSize]); err != nil {
+	for cacheIndex := range c.dirtyBlocks {
+		block := c.blocks[cacheIndex]
+		if err := c.store.WriteBlock(block.Address, block.Data); err != nil {
 			return err
 		}
-		header.V.State = fetchedBlockState
+		c.blocks[cacheIndex].State = fetchedBlockState
 	}
 
 	// This is intentionally done in separate loop to take advantage of the optimisation
@@ -91,172 +99,164 @@ func (c *Cache) fetchBlock(
 	address blocks.BlockAddress,
 	nBytes int64,
 	expectedChecksum blocks.Hash,
-) ([]byte, error) {
+) (*block, error) {
 	if address > c.singularityBlock.V.LastAllocatedBlock {
 		return nil, errors.Errorf("block %d does not exist", address)
 	}
 
-	// TODO (wojciech): Implement marking blocks in cache as deleted to prune them first if space is needed
-
-	cacheAddress, err := c.findCachedBlock(address)
+	cacheIndex, err := c.findCachedBlock(address)
 	if err != nil {
 		return nil, err
 	}
 
-	offset := cacheAddress * CachedBlockSize
-	dataOffset := offset + CacheHeaderSize
-	blockBuffer := c.data[dataOffset : dataOffset+nBytes]
-
-	h := photon.NewFromBytes[header](c.data[offset:])
-	if h.V.State == fetchedBlockState || h.V.State == newBlockState {
-		return c.data[offset : dataOffset+nBytes], nil
+	b := &c.blocks[cacheIndex]
+	if b.State == fetchedBlockState || b.State == newBlockState {
+		return b, nil
 	}
 
-	h.V.Address = address
-	h.V.State = fetchedBlockState
+	b.Address = address
+	b.State = fetchedBlockState
 
-	if err := c.store.ReadBlock(address, blockBuffer); err != nil {
+	if err := c.store.ReadBlock(address, b.Data[:nBytes]); err != nil {
 		return nil, err
 	}
-	if err := blocks.VerifyChecksum(address, blockBuffer, expectedChecksum); err != nil {
+	if err := blocks.VerifyChecksum(address, b.Data[:nBytes], expectedChecksum); err != nil {
 		return nil, err
 	}
 
-	return c.data[offset : dataOffset+nBytes], nil
+	return b, nil
 }
 
-func (c *Cache) newBlock(nBytes int64) ([]byte, error) {
+func (c *Cache) copyBlock(
+	address blocks.BlockAddress,
+	nBytes int64,
+	expectedChecksum blocks.Hash,
+) (*block, error) {
+	b, err := c.fetchBlock(address, nBytes, expectedChecksum)
+	if err != nil {
+		return nil, err
+	}
+
+	if b.State == newBlockState {
+		return b, nil
+	}
+
+	b.State = invalidBlockState
+
+	b2, err := c.newBlock()
+	if err != nil {
+		return nil, err
+	}
+
+	b2.Data, b.Data = b.Data, b2.Data
+
+	return b2, nil
+}
+
+func (c *Cache) newBlock() (*block, error) {
 	address := c.singularityBlock.V.LastAllocatedBlock + 1
-	cacheAddress, err := c.findCachedBlock(address)
+	cacheIndex, err := c.findCachedBlock(address)
 	if err != nil {
 		return nil, err
 	}
 	c.singularityBlock.V.LastAllocatedBlock++
 
-	offset := cacheAddress * CachedBlockSize
-	dataOffset := offset + CacheHeaderSize
-
-	header := photon.NewFromBytes[header](c.data[offset:])
-	header.V.Address = address
-	header.V.State = newBlockState
-
-	// This is done because memory used for padding in structs is not zeroed automatically,
-	// causing mismatch in hashes.
-	copy(c.data[dataOffset:dataOffset+nBytes], zeroContent)
+	b := &c.blocks[cacheIndex]
+	b.Address = address
+	b.State = newBlockState
 
 	if len(c.dirtyBlocks) >= MaxDirtyBlocks {
 		if err := c.commitData(); err != nil {
 			return nil, err
 		}
 	}
-	c.dirtyBlocks[cacheAddress] = struct{}{}
+	c.dirtyBlocks[cacheIndex] = struct{}{}
 
-	return c.data[offset : dataOffset+nBytes], nil
+	return b, nil
 }
 
-func (c *Cache) findCachedBlock(address blocks.BlockAddress) (int64, error) {
+func (c *Cache) findCachedBlock(address blocks.BlockAddress) (uint64, error) {
 	// TODO (wojciech): Implement cache pruning based on hit metric
 
 	// For now, if there is no free space in cache found in `maxCacheTries` tries, the first tried block is replaced
 	// by the fetched one.
-	selectedCacheAddress := int64(address) % c.nBlocks
+	selectedCacheIndex := uint64(address) % c.nBlocks
 	var invalidCacheAddressFound bool
 
 	// Multiplying by 3 instead of 2 here is better, because it produces both even and odd addresses.
-	for i, cacheAddress := 0, selectedCacheAddress; i < MaxCacheTries; i, cacheAddress = i+1, (cacheAddress*3)%c.nBlocks {
-		offset := cacheAddress * CachedBlockSize
-		h := photon.NewFromBytes[header](c.data[offset:])
-
-		switch h.V.State {
+	for i, cacheIndex := 0, selectedCacheIndex; i < MaxCacheTries; i, cacheIndex = i+1, (cacheIndex*3)%c.nBlocks {
+		switch c.blocks[cacheIndex].State {
 		case freeBlockState:
 			if invalidCacheAddressFound {
-				return selectedCacheAddress, nil
+				return selectedCacheIndex, nil
 			}
-			return cacheAddress, nil
+			return cacheIndex, nil
 		case invalidBlockState:
 			if !invalidCacheAddressFound {
 				invalidCacheAddressFound = true
-				selectedCacheAddress = cacheAddress
+				selectedCacheIndex = cacheIndex
 			}
 		case fetchedBlockState, newBlockState:
-			if h.V.Address == address {
-				return cacheAddress, nil
+			if c.blocks[cacheIndex].Address == address {
+				return cacheIndex, nil
 			}
 		}
 	}
 
-	offset := selectedCacheAddress * CachedBlockSize
-	dataOffset := offset + CacheHeaderSize
-
-	h := photon.NewFromBytes[header](c.data[offset:])
-	switch h.V.State {
+	switch c.blocks[selectedCacheIndex].State {
 	case newBlockState:
-		if err := c.store.WriteBlock(h.V.Address, c.data[dataOffset:dataOffset+blocks.BlockSize]); err != nil {
+		if err := c.store.WriteBlock(c.blocks[selectedCacheIndex].Address, c.blocks[selectedCacheIndex].Data); err != nil {
 			return 0, err
 		}
-		delete(c.dirtyBlocks, selectedCacheAddress)
-		h.V.State = invalidBlockState
+		delete(c.dirtyBlocks, selectedCacheIndex)
+		c.blocks[selectedCacheIndex].State = invalidBlockState
 	case fetchedBlockState:
-		h.V.State = invalidBlockState
+		c.blocks[selectedCacheIndex].State = invalidBlockState
 	}
 
-	return selectedCacheAddress, nil
-}
-
-// CachedBlock represents state of the block stored in cache.
-type CachedBlock[T blocks.Block] struct {
-	cache *Cache
-	block photon.Union[*block[T]]
-	Block T
-}
-
-// Address returns addrress of the block.
-func (cb CachedBlock[T]) Address() (blocks.BlockAddress, error) {
-	if cb.block.V == nil || cb.block.V.Header.State == freeBlockState {
-		return 0, errors.New("block hasn't been allocated yet")
-	}
-
-	return cb.block.V.Header.Address, nil
-}
-
-// Commit commits block changes to cache.
-func (cb CachedBlock[T]) Commit() (CachedBlock[T], error) {
-	if cb.block.V == nil || cb.block.V.Header.State != newBlockState {
-		var v T
-		data, err := cb.cache.newBlock(int64(unsafe.Sizeof(v)))
-		if err != nil {
-			return CachedBlock[T]{}, err
-		}
-		cb.block = photon.NewFromBytes[block[T]](data)
-	}
-
-	cb.block.V.Block = cb.Block
-
-	return cb, nil
+	return selectedCacheIndex, nil
 }
 
 // FetchBlock returns structure representing existing block of particular type.
 func FetchBlock[T blocks.Block](
 	cache *Cache,
 	pointer pointerV0.Pointer,
-) (CachedBlock[T], error) {
+) (*T, blocks.BlockAddress, error) {
 	var v T
-	data, err := cache.fetchBlock(pointer.Address, int64(unsafe.Sizeof(v)), pointer.Checksum)
+	block, err := cache.fetchBlock(pointer.Address, int64(unsafe.Sizeof(v)), pointer.Checksum)
 	if err != nil {
-		return CachedBlock[T]{}, err
+		return nil, 0, err
 	}
 
-	block := photon.NewFromBytes[block[T]](data)
-	return CachedBlock[T]{
-		cache: cache,
-		block: block,
-		Block: block.V.Block,
-	}, nil
+	return photon.NewFromBytes[T](block.Data).V, block.Address, nil
+}
+
+// CopyBlock returns a copy of the block of particular type.
+func CopyBlock[T blocks.Block](
+	cache *Cache,
+	pointer pointerV0.Pointer,
+) (*T, blocks.BlockAddress, error) {
+	var v T
+	block, err := cache.copyBlock(pointer.Address, int64(unsafe.Sizeof(v)), pointer.Checksum)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return photon.NewFromBytes[T](block.Data).V, block.Address, nil
 }
 
 // NewBlock returns structure representing new block of particular type.
-func NewBlock[T blocks.Block](cache *Cache) CachedBlock[T] {
-	return CachedBlock[T]{
-		cache: cache,
+func NewBlock[T blocks.Block](cache *Cache) (*T, blocks.BlockAddress, error) {
+	block, err := cache.newBlock()
+	if err != nil {
+		return nil, 0, err
 	}
+
+	p := photon.NewFromBytes[T](block.Data)
+
+	// This is done because memory used for padding in structs is not zeroed automatically,
+	// causing mismatch in hashes.
+	copy(p.B, zeroContent)
+
+	return p.V, block.Address, nil
 }

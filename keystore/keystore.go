@@ -49,7 +49,7 @@ func (s *Store) GetObjectID(key []byte) (blocks.ObjectID, bool, error) {
 		return 0, false, err
 	}
 
-	block := &dataBlockPath.Leaf.Block
+	block := dataBlockPath.Leaf
 	index, chunkFound := findChunkForKey(block, key, hashReminder)
 	if chunkFound && block.ChunkPointerStates[index] == objectlistV0.DefinedChunkState {
 		return block.ObjectLinks[index], true, nil
@@ -82,17 +82,21 @@ func (s *Store) EnsureObjectID(key []byte) (blocks.ObjectID, error) {
 
 	// TODO (wojciech): Implement better open addressing
 
-	if dataBlockPath.Leaf.Block.NUsedChunks >= objectlistV0.SplitTrigger {
+	if dataBlockPath.Leaf.NUsedChunks >= objectlistV0.SplitTrigger {
 		// TODO (wojciech): Check if split is possible - if all the keys have the same hash then it is not.
-		pointer, leafBlock, leafSchemaVersion, err := splitBlock(&dataBlockPath.Leaf.Block, hashReminder, s.c)
+		pointerPointer, leafPointer, leafSchemaVersion, err := splitBlock(*dataBlockPath.Leaf, hashReminder, s.c)
 		if err != nil {
 			return 0, err
 		}
-		dataBlockPath = dataBlockPath.Split(pointer, uint16(hashReminder%pointerV0.PointersPerBlock), leafBlock, leafSchemaVersion)
+		dataBlockPath, err = dataBlockPath.Split(pointerPointer, uint16(hashReminder%pointerV0.PointersPerBlock), leafPointer, leafSchemaVersion)
+		if err != nil {
+			return 0, err
+		}
+
 		hashReminder /= pointerV0.PointersPerBlock
 	}
 
-	objectID, created, err := ensureObjectID(sBlock, &dataBlockPath.Leaf.Block, key, hashReminder)
+	objectID, created, err := ensureObjectID(sBlock, dataBlockPath.Leaf, key, hashReminder)
 	if err != nil {
 		return 0, err
 	}
@@ -240,76 +244,90 @@ func initObjectList(block *objectlistV0.Block) {
 	}
 }
 
-func splitBlock(block *objectlistV0.Block, hashReminder uint64, c *cache.Cache) (pointerV0.Pointer, cache.CachedBlock[objectlistV0.Block], blocks.SchemaVersion, error) {
-	// TODO (wojciech): Find a way to allocate only the amount of blocks really needed. Benchmark spends significant time on it.
-	newPointerIndexes := make([]uint16, 0, pointerV0.PointersPerBlock)
-	newCachedBlocks := make([]cache.CachedBlock[objectlistV0.Block], 0, pointerV0.PointersPerBlock)
-	newBlocks := map[uint16]*objectlistV0.Block{}
-
+func splitBlock(block objectlistV0.Block, hashReminder uint64, c *cache.Cache) (pointerV0.Pointer, pointerV0.Pointer, blocks.SchemaVersion, error) {
 	// Block representing the original hash reminder is created explicitly to be returned even if it's empty,
 	// because later new key is inserted into it.
 	returnedPointerIndex := uint16(hashReminder % pointerV0.PointersPerBlock)
-	newPointerIndexes = append(newPointerIndexes, returnedPointerIndex)
-	newCachedBlocks = append(newCachedBlocks, cache.NewBlock[objectlistV0.Block](c))
-	returnedBlock := &newCachedBlocks[len(newCachedBlocks)-1].Block
-	newBlocks[returnedPointerIndex] = returnedBlock
+	returnedBlock, returnedBlockAddress, err := cache.NewBlock[objectlistV0.Block](c)
+	if err != nil {
+		return pointerV0.Pointer{}, pointerV0.Pointer{}, 0, err
+	}
 	initObjectList(returnedBlock)
+	returnedBlockChecksum := blocks.BlockChecksum(returnedBlock)
 
+	pointerBlock, pointerBlockAddress, err := cache.NewBlock[pointerV0.Block](c)
+	pointerBlock.NUsedPointers = 1
+	pointerBlock.PointedBlockTypes[returnedPointerIndex] = blocks.LeafBlockType
+	pointerBlock.PointedBlockVersions[returnedPointerIndex] = blocks.ObjectListV0
+	pointerBlock.Pointers[returnedPointerIndex] = pointerV0.Pointer{
+		Address:  returnedBlockAddress,
+		Checksum: returnedBlockChecksum,
+	}
+	pointerBlockChecksum := blocks.BlockChecksum(pointerBlock)
+	if err != nil {
+		return pointerV0.Pointer{}, pointerV0.Pointer{}, 0, err
+	}
 	for i := uint16(0); i < objectlistV0.ChunksPerBlock; i++ {
 		if block.ChunkPointerStates[i] != objectlistV0.DefinedChunkState {
 			continue
 		}
 		pointerIndex := uint16(block.KeyHashReminders[i] % pointerV0.PointersPerBlock)
-		newBlock, exists := newBlocks[pointerIndex]
-		if !exists {
-			newPointerIndexes = append(newPointerIndexes, pointerIndex)
-			newCachedBlocks = append(newCachedBlocks, cache.NewBlock[objectlistV0.Block](c))
-			newBlock = &newCachedBlocks[len(newCachedBlocks)-1].Block
-			newBlocks[pointerIndex] = newBlock
-			initObjectList(newBlock)
-		}
-		mergeChunkIntoBlock(newBlock, block, i)
-	}
 
-	pointerBlock := cache.NewBlock[pointerV0.Block](c)
-	var returnedCachedBlock cache.CachedBlock[objectlistV0.Block]
-	for i := 0; i < len(newCachedBlocks); i++ {
-		pointerIndex := newPointerIndexes[i]
+		var newBlock *objectlistV0.Block
+		var newBlockAddress blocks.BlockAddress
+		var err error
+		var isNew bool
+		if pointerBlock.PointedBlockTypes[pointerIndex] == blocks.FreeBlockType {
+			isNew = true
+			newBlock, newBlockAddress, err = cache.NewBlock[objectlistV0.Block](c)
+			if err != nil {
+				return pointerV0.Pointer{}, pointerV0.Pointer{}, 0, err
+			}
+			if newBlock.NUsedChunks == 0 {
+				initObjectList(newBlock)
+			}
+		} else {
+			newBlock, newBlockAddress, err = cache.CopyBlock[objectlistV0.Block](c, pointerBlock.Pointers[pointerIndex])
+			if err != nil {
+				return pointerV0.Pointer{}, pointerV0.Pointer{}, 0, err
+			}
+		}
+
+		mergeChunkIntoBlock(newBlock, &block, i)
+		newBlockChecksum := blocks.BlockChecksum(newBlock)
 
 		if pointerIndex == returnedPointerIndex {
-			returnedCachedBlock = newCachedBlocks[i]
-			continue
+			returnedBlockAddress = newBlockAddress
+			returnedBlockChecksum = newBlockChecksum
 		}
 
-		pointerBlock.Block.NUsedPointers++
-		pointerBlock.Block.PointedBlockTypes[pointerIndex] = blocks.LeafBlockType
-		pointerBlock.Block.PointedBlockVersions[pointerIndex] = blocks.ObjectListV0
-
-		cachedBlock, err := newCachedBlocks[i].Commit()
+		pointerBlock, pointerBlockAddress, err = cache.CopyBlock[pointerV0.Block](c, pointerV0.Pointer{
+			Address:  pointerBlockAddress,
+			Checksum: pointerBlockChecksum,
+		})
 		if err != nil {
-			return pointerV0.Pointer{}, cache.CachedBlock[objectlistV0.Block]{}, 0, err
-		}
-		address, err := cachedBlock.Address()
-		if err != nil {
-			return pointerV0.Pointer{}, cache.CachedBlock[objectlistV0.Block]{}, 0, err
+			return pointerV0.Pointer{}, pointerV0.Pointer{}, 0, err
 		}
 
-		pointerBlock.Block.Pointers[pointerIndex] = pointerV0.Pointer{
-			Checksum: cachedBlock.Block.ComputeChecksum(),
-			Address:  address,
+		if isNew {
+			pointerBlock.NUsedPointers++
 		}
+		pointerBlock.PointedBlockTypes[pointerIndex] = blocks.LeafBlockType
+		pointerBlock.PointedBlockVersions[pointerIndex] = blocks.ObjectListV0
+		pointerBlock.Pointers[pointerIndex] = pointerV0.Pointer{
+			Address:  newBlockAddress,
+			Checksum: newBlockChecksum,
+		}
+		pointerBlockChecksum = blocks.BlockChecksum(pointerBlock)
 	}
 
-	pointerBlock, err := pointerBlock.Commit()
-	if err != nil {
-		return pointerV0.Pointer{}, cache.CachedBlock[objectlistV0.Block]{}, 0, err
-	}
-	pointerBlockAddress, err := pointerBlock.Address()
-	if err != nil {
-		return pointerV0.Pointer{}, cache.CachedBlock[objectlistV0.Block]{}, 0, err
-	}
-
-	return pointerV0.Pointer{Address: pointerBlockAddress, Checksum: pointerBlock.Block.ComputeChecksum()}, returnedCachedBlock, blocks.ObjectListV0, nil
+	return pointerV0.Pointer{
+			Address:  pointerBlockAddress,
+			Checksum: pointerBlockChecksum,
+		}, pointerV0.Pointer{
+			Address:  returnedBlockAddress,
+			Checksum: returnedBlockChecksum,
+		}, blocks.ObjectListV0, nil
 }
 
 func mergeChunkIntoBlock(dstBlock *objectlistV0.Block, srcBlock *objectlistV0.Block, srcIndex uint16) {
@@ -357,8 +375,9 @@ type keyPath[T blocks.Block] struct {
 	rootBlockType          *blocks.BlockType
 	rootBlockSchemaVersion *blocks.SchemaVersion
 	leafSchemaVersion      blocks.SchemaVersion
+	leafAddress            blocks.BlockAddress
 	hops                   []hop
-	Leaf                   cache.CachedBlock[T]
+	Leaf                   *T
 }
 
 func lookupByKeyHash[T blocks.Block](
@@ -367,7 +386,7 @@ func lookupByKeyHash[T blocks.Block](
 	rootBlockType *blocks.BlockType,
 	rootBlockSchemaVersion *blocks.SchemaVersion,
 	leafSchemaVersion blocks.SchemaVersion,
-	createIfMissing bool,
+	forUpdate bool,
 	keyHash uint64,
 ) (keyPath[T], uint64, bool, error) {
 	currentPointer := *rootPointer
@@ -379,20 +398,33 @@ func lookupByKeyHash[T blocks.Block](
 	for {
 		switch currentPointedBlockType {
 		case blocks.FreeBlockType:
-			if createIfMissing {
+			if forUpdate {
+				leafBlock, address, err := cache.NewBlock[T](c)
+				if err != nil {
+					return keyPath[T]{}, 0, false, err
+				}
 				return keyPath[T]{
 					c:                      c,
 					rootPointer:            rootPointer,
 					rootBlockType:          rootBlockType,
 					rootBlockSchemaVersion: rootBlockSchemaVersion,
+					leafAddress:            address,
 					leafSchemaVersion:      leafSchemaVersion,
 					hops:                   hops,
-					Leaf:                   cache.NewBlock[T](c),
+					Leaf:                   leafBlock,
 				}, hashReminder, true, nil
 			}
 			return keyPath[T]{}, 0, false, nil
 		case blocks.LeafBlockType:
-			leafBlock, err := cache.FetchBlock[T](c, currentPointer)
+			var leafBlock *T
+			var leafAddress blocks.BlockAddress
+			var err error
+			if forUpdate {
+				leafBlock, leafAddress, err = cache.CopyBlock[T](c, currentPointer)
+			} else {
+				leafBlock, leafAddress, err = cache.FetchBlock[T](c, currentPointer)
+			}
+
 			if err != nil {
 				return keyPath[T]{}, 0, false, err
 			}
@@ -401,12 +433,13 @@ func lookupByKeyHash[T blocks.Block](
 				rootPointer:            rootPointer,
 				rootBlockType:          rootBlockType,
 				rootBlockSchemaVersion: rootBlockSchemaVersion,
+				leafAddress:            leafAddress,
 				leafSchemaVersion:      leafSchemaVersion,
 				hops:                   hops,
 				Leaf:                   leafBlock,
 			}, hashReminder, true, nil
 		case blocks.PointerBlockType:
-			pointerBlock, err := cache.FetchBlock[pointerV0.Block](c, currentPointer)
+			pointerBlock, _, err := cache.FetchBlock[pointerV0.Block](c, currentPointer)
 			if err != nil {
 				return keyPath[T]{}, 0, false, err
 			}
@@ -419,76 +452,66 @@ func lookupByKeyHash[T blocks.Block](
 				PointerIndex: pointerIndex,
 			})
 
-			currentPointedBlockType = pointerBlock.Block.PointedBlockTypes[pointerIndex]
-			currentPointer = pointerBlock.Block.Pointers[pointerIndex]
+			currentPointedBlockType = pointerBlock.PointedBlockTypes[pointerIndex]
+			currentPointer = pointerBlock.Pointers[pointerIndex]
 		}
 	}
 }
 
 func (kp keyPath[T]) Split(
-	pointer pointerV0.Pointer,
+	pointerPointer pointerV0.Pointer,
 	pointerIndex uint16,
-	leafBlock cache.CachedBlock[T],
+	leafPointer pointerV0.Pointer,
 	leafSchemaVersion blocks.SchemaVersion,
-) keyPath[T] {
+) (keyPath[T], error) {
 	kp.hops = append(kp.hops, hop{
-		Pointer:      pointer,
+		Pointer:      pointerPointer,
 		PointerIndex: pointerIndex,
 	})
+
+	leafBlock, leafAddress, err := cache.CopyBlock[T](kp.c, leafPointer)
+	if err != nil {
+		return keyPath[T]{}, err
+	}
+
 	kp.Leaf = leafBlock
+	kp.leafAddress = leafAddress
 	kp.leafSchemaVersion = leafSchemaVersion
 
-	return kp
+	return kp, nil
 }
 
-func (kp keyPath[T]) Commit() (cache.CachedBlock[T], error) {
-	leaf, err := kp.Leaf.Commit()
-	if err != nil {
-		return cache.CachedBlock[T]{}, err
-	}
-	address, err := leaf.Address()
-	if err != nil {
-		return cache.CachedBlock[T]{}, err
-	}
-
+func (kp keyPath[T]) Commit() (*T, error) {
 	pointer := pointerV0.Pointer{
-		Address:  address,
-		Checksum: leaf.Block.ComputeChecksum(),
+		Address:  kp.leafAddress,
+		Checksum: blocks.BlockChecksum(kp.Leaf),
 	}
 
 	if nHops := len(kp.hops); nHops > 0 {
 		for i := nHops - 1; i >= 0; i-- {
-			hopBlock, err := cache.FetchBlock[pointerV0.Block](kp.c, kp.hops[i].Pointer)
+			hopBlock, address, err := cache.CopyBlock[pointerV0.Block](kp.c, kp.hops[i].Pointer)
 			if err != nil {
-				return cache.CachedBlock[T]{}, err
+				return nil, err
 			}
 			hopIndex := kp.hops[i].PointerIndex
 
 			// TODO (wojciech): Clean up this
 			if i == nHops-1 {
-				if hopBlock.Block.PointedBlockTypes[hopIndex] == blocks.FreeBlockType {
-					hopBlock.Block.NUsedPointers++
-					hopBlock.Block.PointedBlockTypes[hopIndex] = blocks.LeafBlockType
-					hopBlock.Block.PointedBlockVersions[hopIndex] = kp.leafSchemaVersion
+				if hopBlock.PointedBlockTypes[hopIndex] == blocks.FreeBlockType {
+					hopBlock.NUsedPointers++
+					hopBlock.PointedBlockTypes[hopIndex] = blocks.LeafBlockType
+					hopBlock.PointedBlockVersions[hopIndex] = kp.leafSchemaVersion
 				}
 			} else {
-				hopBlock.Block.PointedBlockTypes[hopIndex] = blocks.PointerBlockType
-				hopBlock.Block.PointedBlockVersions[hopIndex] = blocks.PointerV0
+				hopBlock.PointedBlockTypes[hopIndex] = blocks.PointerBlockType
+				hopBlock.PointedBlockVersions[hopIndex] = blocks.PointerV0
 			}
 
-			hopBlock.Block.Pointers[hopIndex] = pointer
-			pointerBlock, err := hopBlock.Commit()
-			if err != nil {
-				return cache.CachedBlock[T]{}, err
-			}
-			address, err := pointerBlock.Address()
-			if err != nil {
-				return cache.CachedBlock[T]{}, err
-			}
+			hopBlock.Pointers[hopIndex] = pointer
 
 			pointer = pointerV0.Pointer{
 				Address:  address,
-				Checksum: pointerBlock.Block.ComputeChecksum(),
+				Checksum: blocks.BlockChecksum(hopBlock),
 			}
 		}
 
@@ -500,5 +523,5 @@ func (kp keyPath[T]) Commit() (cache.CachedBlock[T], error) {
 	}
 	*kp.rootPointer = pointer
 
-	return leaf, nil
+	return kp.Leaf, nil
 }
