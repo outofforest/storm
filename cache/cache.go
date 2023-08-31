@@ -1,6 +1,8 @@
 package cache
 
 import (
+	"math/rand"
+	"time"
 	"unsafe"
 
 	"github.com/outofforest/photon"
@@ -16,35 +18,47 @@ var zeroContent = make([]byte, blocks.BlockSize)
 
 // Cache caches blocks.
 type Cache struct {
-	store       *persistence.Store
-	nBlocks     uint64
-	data        []byte
-	blocks      []block
-	dirtyBlocks map[uint64]struct{}
+	store             *persistence.Store
+	nBlocks           uint64
+	data              []byte
+	blocks            []block
+	addressingOffsets []uint64
+	dirtyBlocks       map[uint64]struct{}
 
 	singularityBlock photon.Union[*singularityV0.Block]
 }
 
 // New creates new cache.
 func New(store *persistence.Store, size int64) (*Cache, error) {
+	nBlocks := uint64(size) / uint64(blocks.BlockSize)
+	if nBlocks < MaxCacheTries {
+		return nil, errors.Errorf("cache is too small, requested: %d, minimum: %d", size, MaxCacheTries*blocks.BlockSize)
+	}
+
 	sBlock := photon.NewFromValue(&singularityV0.Block{})
 	if err := store.ReadBlock(0, sBlock.B); err != nil {
 		return nil, err
 	}
 
-	nBlocks := uint64(size) / uint64(blocks.BlockSize)
 	data := make([]byte, nBlocks*uint64(blocks.BlockSize))
 	bs := make([]block, nBlocks)
 	for i, offset := 0, int64(0); i < len(bs); i, offset = i+1, offset+blocks.BlockSize {
 		bs[i].Data = data[offset : offset+blocks.BlockSize]
 	}
+
+	addressingOffsets := make([]uint64, nBlocks)
+	for i, v := range rand.New(rand.NewSource(time.Now().UnixNano())).Perm(int(nBlocks)) {
+		addressingOffsets[i] = uint64(v)
+	}
+
 	return &Cache{
-		store:            store,
-		nBlocks:          nBlocks,
-		data:             data,
-		blocks:           bs,
-		dirtyBlocks:      make(map[uint64]struct{}, MaxDirtyBlocks),
-		singularityBlock: sBlock,
+		store:             store,
+		nBlocks:           nBlocks,
+		data:              data,
+		blocks:            bs,
+		addressingOffsets: addressingOffsets,
+		dirtyBlocks:       make(map[uint64]struct{}, MaxDirtyBlocks),
+		singularityBlock:  sBlock,
 	}, nil
 }
 
@@ -83,7 +97,6 @@ func (c *Cache) commitData() error {
 		if err := c.store.WriteBlock(block.Address, block.Data); err != nil {
 			return err
 		}
-		c.blocks[cacheIndex].State = fetchedBlockState
 	}
 
 	// This is intentionally done in separate loop to take advantage of the optimisation
@@ -111,12 +124,13 @@ func (c *Cache) fetchBlock(
 	}
 
 	b := &c.blocks[cacheIndex]
-	if b.State == fetchedBlockState || b.State == newBlockState {
+	if b.State == usedBlockState {
 		return b, nil
 	}
 
 	b.Address = address
-	b.State = fetchedBlockState
+	b.State = usedBlockState
+	b.BirthRevision = birthRevision
 
 	if err := c.store.ReadBlock(address, b.Data[:nBytes]); err != nil {
 		return nil, err
@@ -128,7 +142,7 @@ func (c *Cache) fetchBlock(
 	// This means that block is freshly created but was written to persistent store due to lack of space in cache.
 	// In this is case it is marked as new to avoid useless copying.
 	if birthRevision > c.singularityBlock.V.Revision {
-		b.State = newBlockState
+		c.dirtyBlocks[cacheIndex] = struct{}{}
 	}
 
 	return b, nil
@@ -145,7 +159,7 @@ func (c *Cache) copyBlock(
 		return nil, err
 	}
 
-	if b.State == newBlockState {
+	if b.BirthRevision > c.singularityBlock.V.Revision {
 		return b, nil
 	}
 
@@ -171,7 +185,8 @@ func (c *Cache) newBlock() (*block, error) {
 
 	b := &c.blocks[cacheIndex]
 	b.Address = address
-	b.State = newBlockState
+	b.State = usedBlockState
+	b.BirthRevision = c.singularityBlock.V.Revision + 1
 
 	if len(c.dirtyBlocks) >= MaxDirtyBlocks {
 		if err := c.commitData(); err != nil {
@@ -186,13 +201,14 @@ func (c *Cache) newBlock() (*block, error) {
 func (c *Cache) findCachedBlock(address blocks.BlockAddress) (uint64, error) {
 	// TODO (wojciech): Implement cache pruning based on hit metric
 
+	cacheSeed := uint64(address) % c.nBlocks
 	// For now, if there is no free space in cache found in `maxCacheTries` tries, the first tried block is replaced
 	// by the fetched one.
-	selectedCacheIndex := uint64(address) % c.nBlocks
+	selectedCacheIndex := (cacheSeed + c.addressingOffsets[0]) % c.nBlocks
 	var invalidCacheAddressFound bool
 
-	// Multiplying by 3 instead of 2 here is better, because it produces both even and odd addresses.
-	for i, cacheIndex := 0, selectedCacheIndex; i < MaxCacheTries; i, cacheIndex = i+1, (cacheIndex*3)%c.nBlocks {
+	for i := 0; i < MaxCacheTries; i++ {
+		cacheIndex := (cacheSeed + c.addressingOffsets[i]) % c.nBlocks
 		switch c.blocks[cacheIndex].State {
 		case freeBlockState:
 			if invalidCacheAddressFound {
@@ -204,21 +220,20 @@ func (c *Cache) findCachedBlock(address blocks.BlockAddress) (uint64, error) {
 				invalidCacheAddressFound = true
 				selectedCacheIndex = cacheIndex
 			}
-		case fetchedBlockState, newBlockState:
+		case usedBlockState:
 			if c.blocks[cacheIndex].Address == address {
 				return cacheIndex, nil
 			}
 		}
 	}
 
-	switch c.blocks[selectedCacheIndex].State {
-	case newBlockState:
-		if err := c.store.WriteBlock(c.blocks[selectedCacheIndex].Address, c.blocks[selectedCacheIndex].Data); err != nil {
-			return 0, err
+	if c.blocks[selectedCacheIndex].State == usedBlockState {
+		if c.blocks[selectedCacheIndex].BirthRevision > c.singularityBlock.V.Revision {
+			if err := c.store.WriteBlock(c.blocks[selectedCacheIndex].Address, c.blocks[selectedCacheIndex].Data); err != nil {
+				return 0, err
+			}
+			delete(c.dirtyBlocks, selectedCacheIndex)
 		}
-		delete(c.dirtyBlocks, selectedCacheIndex)
-		c.blocks[selectedCacheIndex].State = invalidBlockState
-	case fetchedBlockState:
 		c.blocks[selectedCacheIndex].State = invalidBlockState
 	}
 
