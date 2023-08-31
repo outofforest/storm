@@ -8,13 +8,13 @@ type blockState byte
 // Enum of possible block states
 const (
 	freeBlockState blockState = iota
-	fetchedBlockState
-	newBlockState
+	usedBlockState
 	invalidBlockState
 )
 
 type block struct {
-	Data    []byte
-	Address blocks.BlockAddress
-	State   blockState
+	Data          []byte
+	Address       blocks.BlockAddress
+	BirthRevision uint64
+	State         blockState
 }

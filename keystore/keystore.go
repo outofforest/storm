@@ -258,6 +258,10 @@ func splitBlock(block objectlistV0.Block, hashReminder uint64, c *cache.Cache) (
 	returnedBlockChecksum := blocks.BlockChecksum(returnedBlock)
 
 	pointerBlock, pointerBlockAddress, err := cache.NewBlock[pointerV0.Block](c)
+	if err != nil {
+		return pointerV0.Pointer{}, pointerV0.Pointer{}, 0, err
+	}
+
 	pointerBlock.NUsedPointers = 1
 	pointerBlock.PointedBlockTypes[returnedPointerIndex] = blocks.LeafBlockType
 	pointerBlock.PointedBlockVersions[returnedPointerIndex] = blocks.ObjectListV0
@@ -267,9 +271,6 @@ func splitBlock(block objectlistV0.Block, hashReminder uint64, c *cache.Cache) (
 		BirthRevision: birthRevision,
 	}
 	pointerBlockChecksum := blocks.BlockChecksum(pointerBlock)
-	if err != nil {
-		return pointerV0.Pointer{}, pointerV0.Pointer{}, 0, err
-	}
 	for i := uint16(0); i < objectlistV0.ChunksPerBlock; i++ {
 		if block.ChunkPointerStates[i] != objectlistV0.DefinedChunkState {
 			continue
@@ -290,7 +291,7 @@ func splitBlock(block objectlistV0.Block, hashReminder uint64, c *cache.Cache) (
 				initObjectList(newBlock)
 			}
 		} else {
-			newBlock, newBlockAddress, err = cache.CopyBlock[objectlistV0.Block](c, pointerBlock.Pointers[pointerIndex])
+			newBlock, newBlockAddress, err = cache.FetchBlock[objectlistV0.Block](c, pointerBlock.Pointers[pointerIndex])
 			if err != nil {
 				return pointerV0.Pointer{}, pointerV0.Pointer{}, 0, err
 			}
@@ -304,7 +305,7 @@ func splitBlock(block objectlistV0.Block, hashReminder uint64, c *cache.Cache) (
 			returnedBlockChecksum = newBlockChecksum
 		}
 
-		pointerBlock, pointerBlockAddress, err = cache.CopyBlock[pointerV0.Block](c, pointerV0.Pointer{
+		pointerBlock, _, err = cache.FetchBlock[pointerV0.Block](c, pointerV0.Pointer{
 			Address:       pointerBlockAddress,
 			Checksum:      pointerBlockChecksum,
 			BirthRevision: birthRevision,
@@ -312,7 +313,6 @@ func splitBlock(block objectlistV0.Block, hashReminder uint64, c *cache.Cache) (
 		if err != nil {
 			return pointerV0.Pointer{}, pointerV0.Pointer{}, 0, err
 		}
-
 		if isNew {
 			pointerBlock.NUsedPointers++
 		}
@@ -427,6 +427,7 @@ func lookupByKeyHash[T blocks.Block](
 			var leafAddress blocks.BlockAddress
 			var err error
 			if forUpdate {
+				// TODO (wojciech): New block should be allocated only when changes are committed
 				leafBlock, leafAddress, err = cache.CopyBlock[T](c, currentPointer)
 			} else {
 				leafBlock, leafAddress, err = cache.FetchBlock[T](c, currentPointer)
