@@ -118,19 +118,14 @@ func (c *Cache) fetchBlock(
 		return nil, errors.Errorf("block %d does not exist", address)
 	}
 
-	cacheIndex, err := c.findCachedBlock(address)
+	b, err := c.findCachedBlock(address, birthRevision)
 	if err != nil {
 		return nil, err
 	}
 
-	b := &c.blocks[cacheIndex]
 	if b.State == usedBlockState {
 		return b, nil
 	}
-
-	b.Address = address
-	b.State = usedBlockState
-	b.BirthRevision = birthRevision
 
 	if err := c.store.ReadBlock(address, b.Data[:nBytes]); err != nil {
 		return nil, err
@@ -139,11 +134,7 @@ func (c *Cache) fetchBlock(
 		return nil, err
 	}
 
-	// This means that block is freshly created but was written to persistent store due to lack of space in cache.
-	// In this is case it is marked as new to avoid useless copying.
-	if birthRevision > c.singularityBlock.V.Revision {
-		c.dirtyBlocks[cacheIndex] = struct{}{}
-	}
+	b.State = usedBlockState
 
 	return b, nil
 }
@@ -177,28 +168,18 @@ func (c *Cache) copyBlock(
 
 func (c *Cache) newBlock() (*block, error) {
 	address := c.singularityBlock.V.LastAllocatedBlock + 1
-	cacheIndex, err := c.findCachedBlock(address)
+	b, err := c.findCachedBlock(address, c.singularityBlock.V.Revision+1)
 	if err != nil {
 		return nil, err
 	}
 	c.singularityBlock.V.LastAllocatedBlock++
 
-	b := &c.blocks[cacheIndex]
-	b.Address = address
 	b.State = usedBlockState
-	b.BirthRevision = c.singularityBlock.V.Revision + 1
-
-	if len(c.dirtyBlocks) >= MaxDirtyBlocks {
-		if err := c.commitData(); err != nil {
-			return nil, err
-		}
-	}
-	c.dirtyBlocks[cacheIndex] = struct{}{}
 
 	return b, nil
 }
 
-func (c *Cache) findCachedBlock(address blocks.BlockAddress) (uint64, error) {
+func (c *Cache) findCachedBlock(address blocks.BlockAddress, birthRevision uint64) (*block, error) {
 	// TODO (wojciech): Implement cache pruning based on hit metric
 
 	cacheSeed := uint64(address) % c.nBlocks
@@ -207,14 +188,15 @@ func (c *Cache) findCachedBlock(address blocks.BlockAddress) (uint64, error) {
 	selectedCacheIndex := (cacheSeed + c.addressingOffsets[0]) % c.nBlocks
 	var invalidCacheAddressFound bool
 
+loop:
 	for i := 0; i < MaxCacheTries; i++ {
 		cacheIndex := (cacheSeed + c.addressingOffsets[i]) % c.nBlocks
 		switch c.blocks[cacheIndex].State {
 		case freeBlockState:
-			if invalidCacheAddressFound {
-				return selectedCacheIndex, nil
+			if !invalidCacheAddressFound {
+				selectedCacheIndex = cacheIndex
 			}
-			return cacheIndex, nil
+			break loop
 		case invalidBlockState:
 			if !invalidCacheAddressFound {
 				invalidCacheAddressFound = true
@@ -222,22 +204,36 @@ func (c *Cache) findCachedBlock(address blocks.BlockAddress) (uint64, error) {
 			}
 		case usedBlockState:
 			if c.blocks[cacheIndex].Address == address {
-				return cacheIndex, nil
+				selectedCacheIndex = cacheIndex
+				break loop
 			}
 		}
 	}
 
-	if c.blocks[selectedCacheIndex].State == usedBlockState {
-		if c.blocks[selectedCacheIndex].BirthRevision > c.singularityBlock.V.Revision {
-			if err := c.store.WriteBlock(c.blocks[selectedCacheIndex].Address, c.blocks[selectedCacheIndex].Data); err != nil {
-				return 0, err
+	b := &c.blocks[selectedCacheIndex]
+	if b.State == usedBlockState && b.Address != address {
+		if b.BirthRevision > c.singularityBlock.V.Revision {
+			if err := c.store.WriteBlock(b.Address, b.Data); err != nil {
+				return nil, err
 			}
 			delete(c.dirtyBlocks, selectedCacheIndex)
 		}
-		c.blocks[selectedCacheIndex].State = invalidBlockState
+		b.State = invalidBlockState
 	}
 
-	return selectedCacheIndex, nil
+	if _, exists := c.dirtyBlocks[selectedCacheIndex]; !exists && birthRevision > c.singularityBlock.V.Revision {
+		if len(c.dirtyBlocks) >= MaxDirtyBlocks {
+			if err := c.commitData(); err != nil {
+				return nil, err
+			}
+		}
+		c.dirtyBlocks[selectedCacheIndex] = struct{}{}
+	}
+
+	b.Address = address
+	b.BirthRevision = birthRevision
+
+	return b, nil
 }
 
 // FetchBlock returns structure representing existing block of particular type.
