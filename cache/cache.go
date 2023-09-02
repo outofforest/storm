@@ -2,7 +2,6 @@ package cache
 
 import (
 	"math/rand"
-	"time"
 	"unsafe"
 
 	"github.com/outofforest/photon"
@@ -21,33 +20,28 @@ type Cache struct {
 	store             *persistence.Store
 	nBlocks           uint64
 	data              []byte
-	blocks            []block
+	blocks            []metadata
 	addressingOffsets []uint64
-	dirtyBlocks       map[uint64]struct{}
-
-	singularityBlock photon.Union[*singularityV0.Block]
+	dirtyBlocks       map[*metadata]struct{} // TODO (wojciech): Limit the number of dirty blocks
+	singularityBlock  photon.Union[*singularityV0.Block]
 }
 
 // New creates new cache.
 func New(store *persistence.Store, size int64) (*Cache, error) {
-	nBlocks := uint64(size) / uint64(blocks.BlockSize)
-	if nBlocks < MaxCacheTries {
-		return nil, errors.Errorf("cache is too small, requested: %d, minimum: %d", size, MaxCacheTries*blocks.BlockSize)
-	}
-
 	sBlock := photon.NewFromValue(&singularityV0.Block{})
 	if err := store.ReadBlock(0, sBlock.B); err != nil {
 		return nil, err
 	}
 
+	nBlocks := uint64(size) / uint64(blocks.BlockSize)
 	data := make([]byte, nBlocks*uint64(blocks.BlockSize))
-	bs := make([]block, nBlocks)
+	bs := make([]metadata, nBlocks)
 	for i, offset := 0, int64(0); i < len(bs); i, offset = i+1, offset+blocks.BlockSize {
 		bs[i].Data = data[offset : offset+blocks.BlockSize]
 	}
 
 	addressingOffsets := make([]uint64, nBlocks)
-	for i, v := range rand.New(rand.NewSource(time.Now().UnixNano())).Perm(int(nBlocks)) {
+	for i, v := range rand.New(rand.NewSource(0)).Perm(int(nBlocks)) {
 		addressingOffsets[i] = uint64(v)
 	}
 
@@ -57,7 +51,7 @@ func New(store *persistence.Store, size int64) (*Cache, error) {
 		data:              data,
 		blocks:            bs,
 		addressingOffsets: addressingOffsets,
-		dirtyBlocks:       make(map[uint64]struct{}, MaxDirtyBlocks),
+		dirtyBlocks:       map[*metadata]struct{}{},
 		singularityBlock:  sBlock,
 	}, nil
 }
@@ -92,20 +86,52 @@ func (c *Cache) Commit() error {
 }
 
 func (c *Cache) commitData() error {
-	for cacheIndex := range c.dirtyBlocks {
-		block := c.blocks[cacheIndex]
-		if err := c.store.WriteBlock(block.Address, block.Data); err != nil {
-			return err
+	for len(c.dirtyBlocks) > 0 {
+		for meta := range c.dirtyBlocks {
+			if meta.NReferences > 0 {
+				continue
+			}
+
+			addrBefore := meta.Address
+			if err := c.commitBlock(meta); err != nil {
+				return err
+			}
+			if meta.Address != addrBefore {
+				meta.State = invalidBlockState
+				meta2, err := c.findCachedBlock(meta.Address, meta.BirthRevision)
+				if err != nil {
+					return err
+				}
+
+				meta2.State = usedBlockState
+				meta2.Data, meta.Data = meta.Data, meta2.Data
+			}
 		}
 	}
+	return nil
+}
 
-	// This is intentionally done in separate loop to take advantage of the optimisation
-	// golang applies when seeing this code.
-	for cacheAddress := range c.dirtyBlocks {
-		delete(c.dirtyBlocks, cacheAddress)
+func (c *Cache) commitBlock(meta *metadata) error {
+	if meta.BirthRevision <= c.singularityBlock.V.Revision {
+		c.singularityBlock.V.LastAllocatedBlock++
+		meta.Address = c.singularityBlock.V.LastAllocatedBlock
+		meta.BirthRevision = c.singularityBlock.V.Revision + 1
+	}
+	if err := c.store.WriteBlock(meta.Address, meta.Data); err != nil {
+		return err
 	}
 
-	return nil
+	// TODO (wojciech): Try to reset map in single step
+	delete(c.dirtyBlocks, meta)
+
+	if meta.PostCommitFunc == nil {
+		return nil
+	}
+
+	postCommitFunc := meta.PostCommitFunc
+	meta.PostCommitFunc = nil
+
+	return postCommitFunc()
 }
 
 func (c *Cache) fetchBlock(
@@ -113,169 +139,149 @@ func (c *Cache) fetchBlock(
 	birthRevision uint64,
 	nBytes int64,
 	expectedChecksum blocks.Hash,
-) (*block, error) {
+) (*metadata, error) {
 	if address > c.singularityBlock.V.LastAllocatedBlock {
 		return nil, errors.Errorf("block %d does not exist", address)
 	}
 
-	b, err := c.findCachedBlock(address, birthRevision)
+	meta, err := c.findCachedBlock(address, birthRevision)
 	if err != nil {
 		return nil, err
 	}
 
-	if b.State == usedBlockState {
-		return b, nil
+	if meta.State == usedBlockState {
+		return meta, nil
 	}
-
-	if err := c.store.ReadBlock(address, b.Data[:nBytes]); err != nil {
+	if err := c.store.ReadBlock(address, meta.Data[:nBytes]); err != nil {
 		return nil, err
 	}
-	if err := blocks.VerifyChecksum(address, b.Data[:nBytes], expectedChecksum); err != nil {
+	if err := blocks.VerifyChecksum(address, meta.Data[:nBytes], expectedChecksum); err != nil {
 		return nil, err
 	}
 
-	b.State = usedBlockState
+	meta.State = usedBlockState
 
-	return b, nil
+	return meta, nil
 }
 
-func (c *Cache) copyBlock(
-	address blocks.BlockAddress,
-	birthRevision uint64,
-	nBytes int64,
-	expectedChecksum blocks.Hash,
-) (*block, error) {
-	b, err := c.fetchBlock(address, birthRevision, nBytes, expectedChecksum)
-	if err != nil {
-		return nil, err
-	}
-
-	if b.BirthRevision > c.singularityBlock.V.Revision {
-		return b, nil
-	}
-
-	b.State = invalidBlockState
-
-	b2, err := c.newBlock()
-	if err != nil {
-		return nil, err
-	}
-
-	b2.Data, b.Data = b.Data, b2.Data
-
-	return b2, nil
-}
-
-func (c *Cache) newBlock() (*block, error) {
-	address := c.singularityBlock.V.LastAllocatedBlock + 1
-	b, err := c.findCachedBlock(address, c.singularityBlock.V.Revision+1)
-	if err != nil {
-		return nil, err
-	}
+func (c *Cache) newBlock() (*metadata, error) {
 	c.singularityBlock.V.LastAllocatedBlock++
+	meta, err := c.findCachedBlock(c.singularityBlock.V.LastAllocatedBlock, c.singularityBlock.V.Revision+1)
+	if err != nil {
+		return nil, err
+	}
 
-	b.State = usedBlockState
+	meta.State = usedBlockState
+	c.dirtyBlocks[meta] = struct{}{}
 
-	return b, nil
+	return meta, nil
 }
 
-func (c *Cache) findCachedBlock(address blocks.BlockAddress, birthRevision uint64) (*block, error) {
+func (c *Cache) findCachedBlock(address blocks.BlockAddress, birthRevision uint64) (*metadata, error) {
 	// TODO (wojciech): Implement cache pruning based on hit metric
 
 	cacheSeed := uint64(address) % c.nBlocks
-	// For now, if there is no free space in cache found in `maxCacheTries` tries, the first tried block is replaced
-	// by the fetched one.
-	selectedCacheIndex := (cacheSeed + c.addressingOffsets[0]) % c.nBlocks
+	var found bool
+	var selectedCacheIndex uint64
 	var invalidCacheAddressFound bool
+	var notReferencedAddressFound bool
 
 loop:
-	for i := 0; i < MaxCacheTries; i++ {
+	for i := uint64(0); i < c.nBlocks; i++ { // TODO (wojciech): Limit the number of tried offsets
 		cacheIndex := (cacheSeed + c.addressingOffsets[i]) % c.nBlocks
 		switch c.blocks[cacheIndex].State {
 		case freeBlockState:
 			if !invalidCacheAddressFound {
+				found = true
 				selectedCacheIndex = cacheIndex
 			}
 			break loop
 		case invalidBlockState:
 			if !invalidCacheAddressFound {
 				invalidCacheAddressFound = true
+				notReferencedAddressFound = true
+				found = true
 				selectedCacheIndex = cacheIndex
 			}
 		case usedBlockState:
 			if c.blocks[cacheIndex].Address == address {
+				found = true
 				selectedCacheIndex = cacheIndex
 				break loop
 			}
-		}
-	}
-
-	b := &c.blocks[selectedCacheIndex]
-	if b.State == usedBlockState && b.Address != address {
-		if b.BirthRevision > c.singularityBlock.V.Revision {
-			if err := c.store.WriteBlock(b.Address, b.Data); err != nil {
-				return nil, err
-			}
-			delete(c.dirtyBlocks, selectedCacheIndex)
-		}
-		b.State = invalidBlockState
-	}
-
-	if _, exists := c.dirtyBlocks[selectedCacheIndex]; !exists && birthRevision > c.singularityBlock.V.Revision {
-		if len(c.dirtyBlocks) >= MaxDirtyBlocks {
-			if err := c.commitData(); err != nil {
-				return nil, err
+			if !notReferencedAddressFound && c.blocks[cacheIndex].NReferences == 0 {
+				notReferencedAddressFound = true
+				found = true
+				selectedCacheIndex = cacheIndex
 			}
 		}
-		c.dirtyBlocks[selectedCacheIndex] = struct{}{}
 	}
 
-	b.Address = address
-	b.BirthRevision = birthRevision
+	if !found {
+		return nil, errors.New("there are no free slots in cache")
+	}
 
-	return b, nil
+	meta := &c.blocks[selectedCacheIndex]
+	if meta.State == usedBlockState && meta.Address != address {
+		if _, exists := c.dirtyBlocks[meta]; exists {
+			if err := c.commitBlock(meta); err != nil {
+				return nil, err
+			}
+		}
+		meta.State = invalidBlockState
+	}
+
+	meta.Address = address
+	meta.BirthRevision = birthRevision
+
+	return meta, nil
 }
 
 // FetchBlock returns structure representing existing block of particular type.
 func FetchBlock[T blocks.Block](
 	cache *Cache,
 	pointer pointerV0.Pointer,
-) (*T, blocks.BlockAddress, error) {
+) (Block[T], bool, error) {
 	var v T
-	block, err := cache.fetchBlock(pointer.Address, pointer.BirthRevision, int64(unsafe.Sizeof(v)), pointer.Checksum)
+	meta, err := cache.fetchBlock(pointer.Address, pointer.BirthRevision, int64(unsafe.Sizeof(v)), pointer.Checksum)
 	if err != nil {
-		return nil, 0, err
+		return Block[T]{}, false, err
 	}
 
-	return photon.NewFromBytes[T](block.Data).V, block.Address, nil
-}
-
-// CopyBlock returns a copy of the block of particular type.
-func CopyBlock[T blocks.Block](
-	cache *Cache,
-	pointer pointerV0.Pointer,
-) (*T, blocks.BlockAddress, error) {
-	var v T
-	block, err := cache.copyBlock(pointer.Address, pointer.BirthRevision, int64(unsafe.Sizeof(v)), pointer.Checksum)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	return photon.NewFromBytes[T](block.Data).V, block.Address, nil
+	return Block[T]{
+		meta:  meta,
+		Block: photon.NewFromBytes[T](meta.Data).V,
+	}, meta.PostCommitFunc == nil, nil
 }
 
 // NewBlock returns structure representing new block of particular type.
-func NewBlock[T blocks.Block](cache *Cache) (*T, blocks.BlockAddress, error) {
-	block, err := cache.newBlock()
+func NewBlock[T blocks.Block](cache *Cache) (Block[T], error) {
+	meta, err := cache.newBlock()
 	if err != nil {
-		return nil, 0, err
+		return Block[T]{}, err
 	}
 
-	p := photon.NewFromBytes[T](block.Data)
+	p := photon.NewFromBytes[T](meta.Data)
 
 	// This is done because memory used for padding in structs is not zeroed automatically,
 	// causing mismatch in hashes.
 	copy(p.B, zeroContent)
 
-	return p.V, block.Address, nil
+	return Block[T]{
+		meta:  meta,
+		Block: p.V,
+	}, nil
+}
+
+// DirtyBlock marks blocks as dirty.
+func DirtyBlock[T blocks.Block](cache *Cache, block Block[T]) error {
+	cache.dirtyBlocks[block.meta] = struct{}{}
+	return nil
+}
+
+// InvalidateBlock marks block in cache as invalid.
+func InvalidateBlock[T blocks.Block](cache *Cache, block Block[T]) {
+	delete(cache.dirtyBlocks, block.meta)
+	block.meta.State = invalidBlockState
+	block.meta.PostCommitFunc = nil
 }

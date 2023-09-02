@@ -22,6 +22,6 @@ func VerifyChecksum(address BlockAddress, p []byte, expectedChecksum Hash) error
 	if checksum == expectedChecksum {
 		return nil
 	}
-	return errors.Errorf("checksum mismatch for block %d, computed: %d, expected: %d",
+	return errors.Errorf("checksum mismatch for block %d, computed: %#v, expected: %#v",
 		address, checksum, expectedChecksum)
 }
