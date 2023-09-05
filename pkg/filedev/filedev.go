@@ -30,24 +30,36 @@ func New(file *os.File) *FileDev {
 // Seek seeks the position.
 func (fd *FileDev) Seek(offset int64, whence int) (int64, error) {
 	n, err := fd.file.Seek(offset, whence)
-	return n, errors.WithStack(err)
+	if err != nil {
+		return n, errors.WithStack(err)
+	}
+	return n, nil
 }
 
 // Read reads data from the file.
 func (fd *FileDev) Read(p []byte) (int, error) {
 	n, err := fd.file.Read(p)
-	return n, errors.WithStack(err)
+	if err != nil {
+		return n, errors.WithStack(err)
+	}
+	return n, nil
 }
 
 // Write writes data to the file.
 func (fd *FileDev) Write(p []byte) (int, error) {
 	n, err := fd.file.Write(p)
-	return n, errors.WithStack(err)
+	if err != nil {
+		return n, errors.WithStack(err)
+	}
+	return n, nil
 }
 
 // Sync syncs data to the file.
 func (fd *FileDev) Sync() error {
-	return errors.WithStack(fd.file.Sync())
+	if err := fd.file.Sync(); err != nil {
+		return errors.WithStack(err)
+	}
+	return nil
 }
 
 // Size returns the byte size of the file.

@@ -70,22 +70,27 @@ func TestSetGet(t *testing.T) {
 }
 
 func TestSplit(t *testing.T) {
+	const (
+		nBatches  = 30
+		batchSize = 50 * objectlistV0.ChunksPerBlock
+	)
+
 	requireT := require.New(t)
 
-	dev := memdev.New(300 * 1024 * 1024)
+	dev := memdev.New(1024 * 1024 * 1024)
 	requireT.NoError(persistence.Initialize(dev, false))
 
 	s, err := persistence.OpenStore(dev)
 	requireT.NoError(err)
 
 	// Cache is intentionally small to ensure that it behaves correctly when cached blocks are unloaded.
-	c, err := cache.New(s, 5*blocks.BlockSize)
+	c, err := cache.New(s, 15*blocks.BlockSize)
 	requireT.NoError(err)
 
 	store, err := New(c)
 	requireT.NoError(err)
 
-	keys := make([][48]byte, 50*objectlistV0.ChunksPerBlock)
+	keys := make([][48]byte, nBatches*batchSize)
 
 	// Create key-objectID pairs
 
@@ -95,10 +100,14 @@ func TestSplit(t *testing.T) {
 	}
 	objectIDs := make([]blocks.ObjectID, 0, len(keys))
 
-	for i := 0; i < len(keys); i++ {
-		objectID, err := store.EnsureObjectID(keys[i][:])
-		requireT.NoError(err)
-		objectIDs = append(objectIDs, objectID)
+	for k, i := 0, 0; i < nBatches; i++ {
+		for j := 0; j < batchSize; j, k = j+1, k+1 {
+			objectID, err := store.EnsureObjectID(keys[k][:])
+			requireT.NoError(err)
+			objectIDs = append(objectIDs, objectID)
+		}
+
+		requireT.NoError(c.Commit())
 	}
 
 	// Get object IDs
@@ -110,10 +119,6 @@ func TestSplit(t *testing.T) {
 		requireT.Equal(objectIDs[i], objectID)
 	}
 
-	// Commit cache
-
-	requireT.NoError(c.Commit())
-
 	// If the same key is ensured again, same ID should be returned
 
 	for i := 0; i < len(keys); i++ {
@@ -124,7 +129,7 @@ func TestSplit(t *testing.T) {
 
 	// Create new cache
 
-	c2, err := cache.New(s, 5*blocks.BlockSize)
+	c2, err := cache.New(s, 15*blocks.BlockSize)
 	requireT.NoError(err)
 
 	store, err = New(c2)
@@ -138,10 +143,6 @@ func TestSplit(t *testing.T) {
 		requireT.True(exists, i)
 		requireT.Equal(objectIDs[i], objectID)
 	}
-
-	// Commit cache
-
-	requireT.NoError(c.Commit())
 
 	// If the same key is ensured again, same ID should be returned
 

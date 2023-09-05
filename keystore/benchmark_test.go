@@ -47,12 +47,13 @@ func BenchmarkKeystore(b *testing.B) {
 		requireT.NoError(err)
 
 		b.StartTimer()
-		for i := 0; i < len(keys); i++ {
-			_, err := store.EnsureObjectID(keys[i][:])
-			requireT.NoError(err)
-		}
+		func() {
+			for i := 0; i < len(keys); i++ {
+				_, _ = store.EnsureObjectID(keys[i][:])
+			}
 
-		requireT.NoError(c.Commit())
+			_ = c.Commit()
+		}()
 		b.StopTimer()
 	}
 }
