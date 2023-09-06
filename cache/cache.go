@@ -231,6 +231,10 @@ loop:
 		meta.State = invalidBlockState
 	}
 
+	if meta.State != usedBlockState {
+		meta.PostCommitFunc = nil
+	}
+
 	meta.Address = address
 	meta.BirthRevision = birthRevision
 
