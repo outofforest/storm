@@ -69,7 +69,7 @@ func TestSetGet(t *testing.T) {
 	requireT.Equal(objectID, objectID2)
 }
 
-func TestSplit(t *testing.T) {
+func TestStoringBatches(t *testing.T) {
 	const (
 		nBatches  = 30
 		batchSize = 50 * objectlistV0.ChunksPerBlock
@@ -77,7 +77,7 @@ func TestSplit(t *testing.T) {
 
 	requireT := require.New(t)
 
-	dev := memdev.New(1024 * 1024 * 1024)
+	dev := memdev.New(2048 * 1024 * 1024)
 	requireT.NoError(persistence.Initialize(dev, false))
 
 	s, err := persistence.OpenStore(dev)
@@ -101,13 +101,52 @@ func TestSplit(t *testing.T) {
 	objectIDs := make([]blocks.ObjectID, 0, len(keys))
 
 	for k, i := 0, 0; i < nBatches; i++ {
+		startK := k
 		for j := 0; j < batchSize; j, k = j+1, k+1 {
 			objectID, err := store.EnsureObjectID(keys[k][:])
 			requireT.NoError(err)
 			objectIDs = append(objectIDs, objectID)
 		}
 
+		// Verify that ensured object ID is the same before committing.
+		k = startK
+		for j := 0; j < batchSize; j, k = j+1, k+1 {
+			objectID, err := store.EnsureObjectID(keys[k][:])
+			requireT.NoError(err)
+			requireT.Equal(objectIDs[k], objectID)
+		}
+
+		// Get object IDs before committing
+
+		k = startK
+		for j := 0; j < batchSize; j, k = j+1, k+1 {
+			objectID, exists, err := store.GetObjectID(keys[k][:])
+			requireT.NoError(err)
+			requireT.True(exists)
+			requireT.Equal(objectIDs[k], objectID)
+		}
+
+		// Commit changes
 		requireT.NoError(c.Commit())
+
+		// Verify that next time same object ID is returned.
+		// As a side effect, it triggers references to pointer blocks to be incremented without bing committed.
+		k = startK
+		for j := 0; j < batchSize; j, k = j+1, k+1 {
+			objectID, err := store.EnsureObjectID(keys[k][:])
+			requireT.NoError(err)
+			requireT.Equal(objectIDs[k], objectID)
+		}
+
+		// Get object IDs
+
+		k = startK
+		for j := 0; j < batchSize; j, k = j+1, k+1 {
+			objectID, exists, err := store.GetObjectID(keys[k][:])
+			requireT.NoError(err)
+			requireT.True(exists)
+			requireT.Equal(objectIDs[k], objectID)
+		}
 	}
 
 	// Get object IDs
@@ -115,7 +154,7 @@ func TestSplit(t *testing.T) {
 	for i := 0; i < len(keys); i++ {
 		objectID, exists, err := store.GetObjectID(keys[i][:])
 		requireT.NoError(err)
-		requireT.True(exists, i)
+		requireT.True(exists)
 		requireT.Equal(objectIDs[i], objectID)
 	}
 
@@ -129,10 +168,10 @@ func TestSplit(t *testing.T) {
 
 	// Create new cache
 
-	c2, err := cache.New(s, 15*blocks.BlockSize)
+	c, err = cache.New(s, 15*blocks.BlockSize)
 	requireT.NoError(err)
 
-	store, err = New(c2)
+	store, err = New(c)
 	requireT.NoError(err)
 
 	// Get object IDs
@@ -140,11 +179,11 @@ func TestSplit(t *testing.T) {
 	for i := 0; i < len(keys); i++ {
 		objectID, exists, err := store.GetObjectID(keys[i][:])
 		requireT.NoError(err)
-		requireT.True(exists, i)
+		requireT.True(exists)
 		requireT.Equal(objectIDs[i], objectID)
 	}
 
-	// If the same key is ensured again, same ID should be returned
+	// If the same key is ensured, same ID should be returned
 
 	for i := 0; i < len(keys); i++ {
 		objectID, err := store.EnsureObjectID(keys[i][:])
