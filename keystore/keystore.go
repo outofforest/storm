@@ -36,11 +36,13 @@ func (s *Store) GetObjectID(key []byte) (blocks.ObjectID, bool, error) {
 	}
 
 	sBlock := s.c.SingularityBlock()
-	dataBlock, hashReminder, exists, _, err := lookupByKeyHash(
+	dataBlock, tagReminder, exists, _, err := cache.TraceTag[objectlistV0.Block](
 		s.c,
-		&sBlock.RootData,
-		&sBlock.RootDataBlockType,
-		&sBlock.RootDataSchemaVersion,
+		cache.BlockOrigin{
+			Pointer:            &sBlock.RootData,
+			BlockType:          &sBlock.RootDataBlockType,
+			BlockSchemaVersion: &sBlock.RootDataSchemaVersion,
+		},
 		false,
 		xxhash.Sum64(key),
 	)
@@ -48,7 +50,7 @@ func (s *Store) GetObjectID(key []byte) (blocks.ObjectID, bool, error) {
 		return 0, false, err
 	}
 
-	index, chunkFound := findChunkPointerForKey(dataBlock.Block.Block, key, hashReminder)
+	index, chunkFound := findChunkPointerForKey(dataBlock.Block.Block, key, tagReminder)
 	if chunkFound && dataBlock.Block.Block.ChunkPointerStates[index] == objectlistV0.DefinedChunkState {
 		return dataBlock.Block.Block.ObjectLinks[index], true, nil
 	}
@@ -66,11 +68,13 @@ func (s *Store) EnsureObjectID(key []byte) (blocks.ObjectID, error) {
 	}
 
 	sBlock := s.c.SingularityBlock()
-	dataBlock, hashReminder, _, splitFunc, err := lookupByKeyHash(
+	dataBlock, tagReminder, _, splitFunc, err := cache.TraceTag[objectlistV0.Block](
 		s.c,
-		&sBlock.RootData,
-		&sBlock.RootDataBlockType,
-		&sBlock.RootDataSchemaVersion,
+		cache.BlockOrigin{
+			Pointer:            &sBlock.RootData,
+			BlockType:          &sBlock.RootDataBlockType,
+			BlockSchemaVersion: &sBlock.RootDataSchemaVersion,
+		},
 		true,
 		xxhash.Sum64(key),
 	)
@@ -78,7 +82,7 @@ func (s *Store) EnsureObjectID(key []byte) (blocks.ObjectID, error) {
 		return 0, err
 	}
 
-	return s.ensureObjectID(sBlock, dataBlock, key, hashReminder, splitFunc)
+	return s.ensureObjectID(sBlock, dataBlock, key, tagReminder, splitFunc)
 }
 
 // Delete deletes key from the store.
@@ -89,12 +93,12 @@ func (s *Store) Delete(key [32]byte) error {
 
 func (s *Store) ensureObjectID(
 	sBlock *singularityV0.Block,
-	block Trace[objectlistV0.Block],
+	block cache.Trace[objectlistV0.Block],
 	key []byte,
-	hashReminder uint64,
+	tagReminder uint64,
 	splitFunc func() (cache.Block[pointerV0.Block], error),
 ) (blocks.ObjectID, error) {
-	index, chunkFound := findChunkPointerForKey(block.Block.Block, key, hashReminder)
+	index, chunkFound := findChunkPointerForKey(block.Block.Block, key, tagReminder)
 	if chunkFound && block.Block.Block.ChunkPointerStates[index] == objectlistV0.DefinedChunkState {
 		for _, pointerBlock := range block.PointerBlocks {
 			pointerBlock.DecrementReferences()
@@ -113,20 +117,20 @@ func (s *Store) ensureObjectID(
 			return 0, err
 		}
 
-		block.Block, err = s.splitBlock(oldBlock, newPointerBlock, hashReminder)
+		block.Block, err = s.splitBlock(oldBlock, newPointerBlock, tagReminder)
 		if err != nil {
 			return 0, err
 		}
 
-		hashReminder /= pointerV0.PointersPerBlock
-		index, chunkFound = findChunkPointerForKey(block.Block.Block, key, hashReminder)
+		tagReminder /= pointerV0.PointersPerBlock
+		index, chunkFound = findChunkPointerForKey(block.Block.Block, key, tagReminder)
 	}
 
 	if !chunkFound {
 		return 0, errors.Errorf("cannot find chunk for key %s", hex.EncodeToString(key))
 	}
 
-	if err := setKeyInChunks(block.Block.Block, index, key, hashReminder); err != nil {
+	if err := setKeyInChunks(block.Block.Block, index, key, tagReminder); err != nil {
 		return 0, err
 	}
 
@@ -143,7 +147,7 @@ func (s *Store) ensureObjectID(
 func (s *Store) splitBlock(
 	block objectlistV0.Block,
 	newPointerBlock cache.Block[pointerV0.Block],
-	hashReminder uint64,
+	tagReminder uint64,
 ) (cache.Block[objectlistV0.Block], error) {
 	sBlock := s.c.SingularityBlock()
 
@@ -153,7 +157,7 @@ func (s *Store) splitBlock(
 		return cache.Block[objectlistV0.Block]{}, err
 	}
 
-	returnedPointerIndex := hashReminder % pointerV0.PointersPerBlock
+	returnedPointerIndex := tagReminder % pointerV0.PointersPerBlock
 	newPointerBlock.Block.Pointers[returnedPointerIndex] = pointerV0.Pointer{
 		Address:       returnedBlock.Address(),
 		BirthRevision: sBlock.Revision + 1,
@@ -161,12 +165,14 @@ func (s *Store) splitBlock(
 	newPointerBlock.Block.PointedBlockTypes[returnedPointerIndex] = blocks.LeafBlockType
 	newPointerBlock.Block.PointedBlockVersions[returnedPointerIndex] = blocks.ObjectListV0
 
-	returnedBlock.WithPostCommitFunc(newLeafBlockPostCommitFunc(
+	returnedBlock.WithPostCommitFunc(cache.NewLeafBlockPostCommitFunc(
 		s.c,
-		newPointerBlock,
-		&newPointerBlock.Block.Pointers[returnedPointerIndex],
-		&newPointerBlock.Block.PointedBlockTypes[returnedPointerIndex],
-		&newPointerBlock.Block.PointedBlockVersions[returnedPointerIndex],
+		cache.BlockOrigin{
+			PointerBlock:       newPointerBlock,
+			Pointer:            &newPointerBlock.Block.Pointers[returnedPointerIndex],
+			BlockType:          &newPointerBlock.Block.PointedBlockTypes[returnedPointerIndex],
+			BlockSchemaVersion: &newPointerBlock.Block.PointedBlockVersions[returnedPointerIndex],
+		},
 		returnedBlock,
 	))
 	initFreeChunkList(returnedBlock.Block)
@@ -177,7 +183,7 @@ func (s *Store) splitBlock(
 		}
 
 		var newBlock cache.Block[objectlistV0.Block]
-		pointerIndex := block.KeyHashReminders[i] % pointerV0.PointersPerBlock
+		pointerIndex := block.KeyTagReminders[i] % pointerV0.PointersPerBlock
 		if newPointerBlock.Block.PointedBlockTypes[pointerIndex] == blocks.FreeBlockType {
 			newPointerBlock.IncrementReferences()
 			var err error
@@ -186,12 +192,14 @@ func (s *Store) splitBlock(
 				return cache.Block[objectlistV0.Block]{}, err
 			}
 
-			newBlock.WithPostCommitFunc(newLeafBlockPostCommitFunc(
+			newBlock.WithPostCommitFunc(cache.NewLeafBlockPostCommitFunc(
 				s.c,
-				newPointerBlock,
-				&newPointerBlock.Block.Pointers[pointerIndex],
-				&newPointerBlock.Block.PointedBlockTypes[pointerIndex],
-				&newPointerBlock.Block.PointedBlockVersions[pointerIndex],
+				cache.BlockOrigin{
+					PointerBlock:       newPointerBlock,
+					Pointer:            &newPointerBlock.Block.Pointers[pointerIndex],
+					BlockType:          &newPointerBlock.Block.PointedBlockTypes[pointerIndex],
+					BlockSchemaVersion: &newPointerBlock.Block.PointedBlockVersions[pointerIndex],
+				},
 				newBlock,
 			))
 
@@ -214,12 +222,14 @@ func (s *Store) splitBlock(
 			}
 
 			if addedToCache {
-				newBlock.WithPostCommitFunc(newLeafBlockPostCommitFunc(
+				newBlock.WithPostCommitFunc(cache.NewLeafBlockPostCommitFunc(
 					s.c,
-					newPointerBlock,
-					&newPointerBlock.Block.Pointers[pointerIndex],
-					&newPointerBlock.Block.PointedBlockTypes[pointerIndex],
-					&newPointerBlock.Block.PointedBlockVersions[pointerIndex],
+					cache.BlockOrigin{
+						PointerBlock:       newPointerBlock,
+						Pointer:            &newPointerBlock.Block.Pointers[pointerIndex],
+						BlockType:          &newPointerBlock.Block.PointedBlockTypes[pointerIndex],
+						BlockSchemaVersion: &newPointerBlock.Block.PointedBlockVersions[pointerIndex],
+					},
 					newBlock,
 				))
 			} else {
@@ -240,12 +250,14 @@ func (s *Store) splitBlock(
 	}
 
 	if addedToCache {
-		returnedBlock.WithPostCommitFunc(newLeafBlockPostCommitFunc(
+		returnedBlock.WithPostCommitFunc(cache.NewLeafBlockPostCommitFunc(
 			s.c,
-			newPointerBlock,
-			&newPointerBlock.Block.Pointers[returnedPointerIndex],
-			&newPointerBlock.Block.PointedBlockTypes[returnedPointerIndex],
-			&newPointerBlock.Block.PointedBlockVersions[returnedPointerIndex],
+			cache.BlockOrigin{
+				PointerBlock:       newPointerBlock,
+				Pointer:            &newPointerBlock.Block.Pointers[returnedPointerIndex],
+				BlockType:          &newPointerBlock.Block.PointedBlockTypes[returnedPointerIndex],
+				BlockSchemaVersion: &newPointerBlock.Block.PointedBlockVersions[returnedPointerIndex],
+			},
 			returnedBlock,
 		))
 	} else {
@@ -255,8 +267,8 @@ func (s *Store) splitBlock(
 	return returnedBlock, nil
 }
 
-func verifyKeyInChunks(key []byte, hashReminder uint64, block *objectlistV0.Block, index uint16) bool {
-	if block.KeyHashReminders[index] != hashReminder {
+func verifyKeyInChunks(key []byte, tagReminder uint64, block *objectlistV0.Block, index uint16) bool {
+	if block.KeyTagReminders[index] != tagReminder {
 		return false
 	}
 
@@ -282,7 +294,7 @@ func setKeyInChunks(
 	block *objectlistV0.Block,
 	index uint16,
 	key []byte,
-	hashReminder uint64,
+	tagReminder uint64,
 ) error {
 	nBlocksRequired := (uint16(len(key)) + objectlistV0.ChunkSize - 1) / objectlistV0.ChunkSize
 	if block.NUsedChunks+nBlocksRequired > objectlistV0.ChunksPerBlock {
@@ -297,7 +309,7 @@ func setKeyInChunks(
 
 	block.ChunkPointerStates[index] = objectlistV0.DefinedChunkState
 	block.ChunkPointers[index] = block.FreeChunkIndex
-	block.KeyHashReminders[index] = hashReminder
+	block.KeyTagReminders[index] = tagReminder
 
 	var lastChunkIndex uint16
 	var nCopied int
@@ -324,17 +336,17 @@ func setKeyInChunks(
 func findChunkPointerForKey(
 	block *objectlistV0.Block,
 	key []byte,
-	hashReminder uint64,
+	tagReminder uint64,
 ) (uint16, bool) {
 	var invalidChunkFound bool
 	var invalidChunkIndex uint16
 
-	chunkOffsetSeed := uint16(hashReminder % objectlistV0.ChunksPerBlock)
+	chunkOffsetSeed := uint16(tagReminder % objectlistV0.ChunksPerBlock)
 	for i := 0; i < objectlistV0.ChunksPerBlock; i++ {
 		index := (chunkOffsetSeed + objectlistV0.AddressingOffsets[i]) % objectlistV0.ChunksPerBlock
 		switch block.ChunkPointerStates[index] {
 		case objectlistV0.DefinedChunkState:
-			if key == nil || !verifyKeyInChunks(key, hashReminder, block, index) {
+			if key == nil || !verifyKeyInChunks(key, tagReminder, block, index) {
 				continue
 			}
 		case objectlistV0.InvalidChunkState:
@@ -367,13 +379,13 @@ func initFreeChunkList(block *objectlistV0.Block) {
 func copyKeyChunksBetweenBlocks(dstBlock *objectlistV0.Block, srcBlock *objectlistV0.Block, srcIndex uint16) {
 	objectID := srcBlock.ObjectLinks[srcIndex]
 
-	dstHashReminder := srcBlock.KeyHashReminders[srcIndex] / pointerV0.PointersPerBlock
+	dstTagReminder := srcBlock.KeyTagReminders[srcIndex] / pointerV0.PointersPerBlock
 
-	dstIndex, _ := findChunkPointerForKey(dstBlock, nil, dstHashReminder)
+	dstIndex, _ := findChunkPointerForKey(dstBlock, nil, dstTagReminder)
 	dstBlock.ChunkPointerStates[dstIndex] = objectlistV0.DefinedChunkState
 	dstBlock.ChunkPointers[dstIndex] = dstBlock.FreeChunkIndex
 	dstBlock.ObjectLinks[dstIndex] = objectID
-	dstBlock.KeyHashReminders[dstIndex] = dstHashReminder
+	dstBlock.KeyTagReminders[dstIndex] = dstTagReminder
 
 	srcChunkIndex := srcBlock.ChunkPointers[srcIndex]
 	var dstLastChunkIndex uint16
@@ -391,221 +403,4 @@ func copyKeyChunksBetweenBlocks(dstBlock *objectlistV0.Block, srcBlock *objectli
 	}
 	// For the last record `srcChunkIndex` contains `ChunkSize+remaininglength` so it might be assigned directly.
 	dstBlock.NextChunkPointers[dstLastChunkIndex] = srcChunkIndex
-}
-
-func lookupByKeyHash(
-	c *cache.Cache,
-	rootPointer *pointerV0.Pointer,
-	rootBlockType *blocks.BlockType,
-	rootBlockSchemaVersion *blocks.SchemaVersion,
-	forUpdate bool,
-	keyHash uint64,
-) (Trace[objectlistV0.Block], uint64, bool, func() (cache.Block[pointerV0.Block], error), error) {
-	currentPointer := rootPointer
-	currentBlockType := rootBlockType
-	currentBlockSchemaVersion := rootBlockSchemaVersion
-	var currentPointerBlock cache.Block[pointerV0.Block]
-	var leafBlock cache.Block[objectlistV0.Block]
-	pointerTrace := make([]cache.Block[pointerV0.Block], 0, 11) // TODO (wojciech): Find the right size
-
-	hashReminder := keyHash
-
-	var pointerIndex uint64
-	for {
-		switch *currentBlockType {
-		case blocks.FreeBlockType:
-			if forUpdate {
-				if currentPointerBlock.IsValid() {
-					currentPointerBlock.IncrementReferences()
-					pointerTrace = append(pointerTrace, currentPointerBlock)
-				}
-
-				var err error
-				leafBlock, err = cache.NewBlock[objectlistV0.Block](c)
-				if err != nil {
-					return Trace[objectlistV0.Block]{}, 0, false, nil, err
-				}
-				leafBlock.WithPostCommitFunc(newLeafBlockPostCommitFunc(
-					c,
-					currentPointerBlock,
-					currentPointer,
-					currentBlockType,
-					currentBlockSchemaVersion,
-					leafBlock,
-				))
-
-				*currentPointer = pointerV0.Pointer{
-					Address:       leafBlock.Address(),
-					BirthRevision: c.SingularityBlock().Revision + 1,
-				}
-				*currentBlockType = blocks.LeafBlockType
-				*currentBlockSchemaVersion = blocks.ObjectListV0
-
-				return Trace[objectlistV0.Block]{
-					PointerBlocks: pointerTrace,
-					Block:         leafBlock,
-				}, hashReminder, true, nil, nil
-			}
-			return Trace[objectlistV0.Block]{}, 0, false, nil, nil
-		case blocks.LeafBlockType:
-			// This is done to prevent pointer block from being unloaded when leaf block is added to the cache.
-			if forUpdate && currentPointerBlock.IsValid() {
-				currentPointerBlock.IncrementReferences()
-			}
-
-			var addedToCache bool
-			var err error
-			leafBlock, addedToCache, err = cache.FetchBlock[objectlistV0.Block](c, *currentPointer)
-			if err != nil {
-				return Trace[objectlistV0.Block]{}, 0, false, nil, err
-			}
-
-			tracedBlock := Trace[objectlistV0.Block]{
-				Block: leafBlock,
-			}
-
-			if forUpdate {
-				if addedToCache {
-					if currentPointerBlock.IsValid() {
-						pointerTrace = append(pointerTrace, currentPointerBlock)
-					}
-					leafBlock.WithPostCommitFunc(newLeafBlockPostCommitFunc(
-						c,
-						currentPointerBlock,
-						currentPointer,
-						currentBlockType,
-						currentBlockSchemaVersion,
-						leafBlock,
-					))
-				} else if currentPointerBlock.IsValid() {
-					// If leaf block has been already present in the cache, it means that pointer block reference was incorrectly incremented,
-					// and it must e fixed now.
-					currentPointerBlock.DecrementReferences()
-				}
-
-				tracedBlock.PointerBlocks = pointerTrace
-			}
-
-			splitFunc := func() (cache.Block[pointerV0.Block], error) {
-				newPointerBlock, err := cache.NewBlock[pointerV0.Block](c)
-				if err != nil {
-					return cache.Block[pointerV0.Block]{}, err
-				}
-
-				newPointerBlock.WithPostCommitFunc(newPointerBlockPostCommitFunc(
-					c,
-					currentPointerBlock,
-					currentPointer,
-					currentBlockType,
-					currentBlockSchemaVersion,
-					newPointerBlock,
-				))
-
-				*currentPointer = pointerV0.Pointer{
-					Address:       newPointerBlock.Address(),
-					BirthRevision: newPointerBlock.BirthRevision(),
-				}
-				*currentBlockType = blocks.PointerBlockType
-				*currentBlockSchemaVersion = blocks.PointerV0
-
-				return newPointerBlock, nil
-			}
-
-			return tracedBlock, hashReminder, true, splitFunc, nil
-		case blocks.PointerBlockType:
-			// This is done to prevent pointer block from being unloaded when leaf block is added to the cache.
-			if forUpdate && currentPointerBlock.IsValid() {
-				currentPointerBlock.IncrementReferences()
-			}
-
-			nextPointerBlock, addedToCache, err := cache.FetchBlock[pointerV0.Block](c, *currentPointer)
-			if err != nil {
-				return Trace[objectlistV0.Block]{}, 0, false, nil, err
-			}
-
-			if forUpdate {
-				if addedToCache {
-					if currentPointerBlock.IsValid() {
-						pointerTrace = append(pointerTrace, currentPointerBlock)
-					}
-					nextPointerBlock.WithPostCommitFunc(newPointerBlockPostCommitFunc(
-						c,
-						currentPointerBlock,
-						currentPointer,
-						currentBlockType,
-						currentBlockSchemaVersion,
-						nextPointerBlock,
-					))
-				} else if currentPointerBlock.IsValid() {
-					// If next pointer block has been already present in the cache, it means that previous pointer block reference was incorrectly incremented,
-					// and it must e fixed now.
-					currentPointerBlock.DecrementReferences()
-				}
-			}
-
-			pointerIndex = hashReminder % pointerV0.PointersPerBlock
-			hashReminder /= pointerV0.PointersPerBlock
-
-			currentPointerBlock = nextPointerBlock
-			currentPointer = &nextPointerBlock.Block.Pointers[pointerIndex]
-			currentBlockType = &nextPointerBlock.Block.PointedBlockTypes[pointerIndex]
-			currentBlockSchemaVersion = &nextPointerBlock.Block.PointedBlockVersions[pointerIndex]
-		}
-	}
-}
-
-func newLeafBlockPostCommitFunc(
-	c *cache.Cache,
-	parentBlock cache.Block[pointerV0.Block],
-	parentPointer *pointerV0.Pointer,
-	parentBlockType *blocks.BlockType,
-	parentBlockSchemaVersion *blocks.SchemaVersion,
-	leafBlock cache.Block[objectlistV0.Block],
-) func() error {
-	return func() error {
-		*parentPointer = pointerV0.Pointer{
-			Checksum:      blocks.BlockChecksum(leafBlock.Block),
-			Address:       leafBlock.Address(),
-			BirthRevision: leafBlock.BirthRevision(),
-		}
-		*parentBlockType = blocks.LeafBlockType
-		*parentBlockSchemaVersion = blocks.ObjectListV0
-
-		if parentBlock.IsValid() {
-			parentBlock.DecrementReferences()
-			if err := cache.DirtyBlock(c, parentBlock); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	}
-}
-
-func newPointerBlockPostCommitFunc(
-	c *cache.Cache,
-	parentBlock cache.Block[pointerV0.Block],
-	parentPointer *pointerV0.Pointer,
-	parentBlockType *blocks.BlockType,
-	parentBlockSchemaVersion *blocks.SchemaVersion,
-	pointerBlock cache.Block[pointerV0.Block],
-) func() error {
-	return func() error {
-		*parentPointer = pointerV0.Pointer{
-			Checksum:      blocks.BlockChecksum(pointerBlock.Block),
-			Address:       pointerBlock.Address(),
-			BirthRevision: pointerBlock.BirthRevision(),
-		}
-		*parentBlockType = blocks.PointerBlockType
-		*parentBlockSchemaVersion = blocks.PointerV0
-
-		if parentBlock.IsValid() {
-			parentBlock.DecrementReferences()
-			if err := cache.DirtyBlock(c, parentBlock); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	}
 }

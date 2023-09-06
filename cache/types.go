@@ -2,6 +2,7 @@ package cache
 
 import (
 	"github.com/outofforest/storm/blocks"
+	pointerV0 "github.com/outofforest/storm/blocks/pointer/v0"
 )
 
 // blockState is the enum representing the state of the block.
@@ -21,6 +22,21 @@ type metadata struct {
 	NReferences    uint64
 	State          blockState
 	PostCommitFunc func() error
+}
+
+// BlockOrigin tracks information collected during traversing the tree up to the leaf block.
+type BlockOrigin struct {
+	PointerBlock       Block[pointerV0.Block]
+	Pointer            *pointerV0.Pointer
+	BlockType          *blocks.BlockType
+	BlockSchemaVersion *blocks.SchemaVersion
+}
+
+// Trace stores the trace of incremented pointer blocks leading to the final leaf node
+type Trace[T blocks.Block] struct {
+	PointerBlocks []Block[pointerV0.Block]
+	Origin        BlockOrigin
+	Block         Block[T]
 }
 
 // Block represents block stored in cache.
