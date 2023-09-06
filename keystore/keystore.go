@@ -48,7 +48,7 @@ func (s *Store) GetObjectID(key []byte) (blocks.ObjectID, bool, error) {
 		return 0, false, err
 	}
 
-	index, chunkFound := findChunkForKey(dataBlock.Block.Block, key, hashReminder)
+	index, chunkFound := findChunkPointerForKey(dataBlock.Block.Block, key, hashReminder)
 	if chunkFound && dataBlock.Block.Block.ChunkPointerStates[index] == objectlistV0.DefinedChunkState {
 		return dataBlock.Block.Block.ObjectLinks[index], true, nil
 	}
@@ -78,8 +78,6 @@ func (s *Store) EnsureObjectID(key []byte) (blocks.ObjectID, error) {
 		return 0, err
 	}
 
-	// TODO (wojciech): Implement better open addressing
-
 	return s.ensureObjectID(sBlock, dataBlock, key, hashReminder, splitFunc)
 }
 
@@ -96,7 +94,7 @@ func (s *Store) ensureObjectID(
 	hashReminder uint64,
 	splitFunc func() (cache.Block[pointerV0.Block], error),
 ) (blocks.ObjectID, error) {
-	index, chunkFound := findChunkForKey(block.Block.Block, key, hashReminder)
+	index, chunkFound := findChunkPointerForKey(block.Block.Block, key, hashReminder)
 	if chunkFound && block.Block.Block.ChunkPointerStates[index] == objectlistV0.DefinedChunkState {
 		for _, pointerBlock := range block.PointerBlocks {
 			pointerBlock.DecrementReferences()
@@ -121,14 +119,14 @@ func (s *Store) ensureObjectID(
 		}
 
 		hashReminder /= pointerV0.PointersPerBlock
-		index, chunkFound = findChunkForKey(block.Block.Block, key, hashReminder)
+		index, chunkFound = findChunkPointerForKey(block.Block.Block, key, hashReminder)
 	}
 
 	if !chunkFound {
 		return 0, errors.Errorf("cannot find chunk for key %s", hex.EncodeToString(key))
 	}
 
-	if err := setupChunk(block.Block.Block, index, key, hashReminder); err != nil {
+	if err := setKeyInChunks(block.Block.Block, index, key, hashReminder); err != nil {
 		return 0, err
 	}
 
@@ -172,7 +170,7 @@ func (s *Store) splitBlock(
 		&newPointerBlock.Block.PointedBlockVersions[returnedPointerIndex],
 		returnedBlock,
 	))
-	initObjectList(returnedBlock.Block)
+	initFreeChunkList(returnedBlock.Block)
 
 	for i := uint16(0); i < objectlistV0.ChunksPerBlock; i++ {
 		if block.ChunkPointerStates[i] != objectlistV0.DefinedChunkState {
@@ -206,7 +204,7 @@ func (s *Store) splitBlock(
 			newPointerBlock.Block.PointedBlockTypes[pointerIndex] = blocks.LeafBlockType
 			newPointerBlock.Block.PointedBlockVersions[pointerIndex] = blocks.ObjectListV0
 
-			initObjectList(newBlock.Block)
+			initFreeChunkList(newBlock.Block)
 		} else {
 			newPointerBlock.IncrementReferences()
 
@@ -231,7 +229,7 @@ func (s *Store) splitBlock(
 			}
 		}
 
-		mergeChunkIntoBlock(newBlock.Block, &block, i)
+		copyKeyChunksBetweenBlocks(newBlock.Block, &block, i)
 		if err := cache.DirtyBlock(s.c, newBlock); err != nil {
 			return cache.Block[objectlistV0.Block]{}, err
 		}
@@ -259,7 +257,7 @@ func (s *Store) splitBlock(
 	return returnedBlock, nil
 }
 
-func verifyKey(key []byte, hashReminder uint64, block *objectlistV0.Block, index uint16) bool {
+func verifyKeyInChunks(key []byte, hashReminder uint64, block *objectlistV0.Block, index uint16) bool {
 	if block.KeyHashReminders[index] != hashReminder {
 		return false
 	}
@@ -282,7 +280,7 @@ func verifyKey(key []byte, hashReminder uint64, block *objectlistV0.Block, index
 	}
 }
 
-func setupChunk(
+func setKeyInChunks(
 	block *objectlistV0.Block,
 	index uint16,
 	key []byte,
@@ -296,7 +294,7 @@ func setupChunk(
 	}
 
 	if block.NUsedChunks == 0 {
-		initObjectList(block)
+		initFreeChunkList(block)
 	}
 
 	block.ChunkPointerStates[index] = objectlistV0.DefinedChunkState
@@ -325,17 +323,20 @@ func setupChunk(
 	return nil
 }
 
-func findChunkForKey(
+func findChunkPointerForKey(
 	block *objectlistV0.Block,
 	key []byte,
 	hashReminder uint64,
 ) (uint16, bool) {
 	var invalidChunkFound bool
 	var invalidChunkIndex uint16
-	for i, index := 0, uint16(hashReminder%objectlistV0.ChunksPerBlock); i < objectlistV0.ChunksPerBlock; i, index = i+1, (index+1)%objectlistV0.ChunksPerBlock {
+
+	chunkOffsetSeed := uint16(hashReminder % objectlistV0.ChunksPerBlock)
+	for i := 0; i < objectlistV0.ChunksPerBlock; i++ {
+		index := (chunkOffsetSeed + objectlistV0.AddressingOffsets[i]) % objectlistV0.ChunksPerBlock
 		switch block.ChunkPointerStates[index] {
 		case objectlistV0.DefinedChunkState:
-			if key == nil || !verifyKey(key, hashReminder, block, index) {
+			if key == nil || !verifyKeyInChunks(key, hashReminder, block, index) {
 				continue
 			}
 		case objectlistV0.InvalidChunkState:
@@ -359,22 +360,18 @@ func findChunkForKey(
 	return 0, false
 }
 
-func initObjectList(block *objectlistV0.Block) {
+func initFreeChunkList(block *objectlistV0.Block) {
 	for i := uint16(0); i < objectlistV0.ChunksPerBlock; i++ {
 		block.NextChunkPointers[i] = i + 1
 	}
 }
 
-func mergeChunkIntoBlock(dstBlock *objectlistV0.Block, srcBlock *objectlistV0.Block, srcIndex uint16) {
+func copyKeyChunksBetweenBlocks(dstBlock *objectlistV0.Block, srcBlock *objectlistV0.Block, srcIndex uint16) {
 	objectID := srcBlock.ObjectLinks[srcIndex]
 
 	dstHashReminder := srcBlock.KeyHashReminders[srcIndex] / pointerV0.PointersPerBlock
 
-	dstIndex, dstChunkFound := findChunkForKey(dstBlock, nil, dstHashReminder)
-	if !dstChunkFound {
-		panic("impossible situation")
-	}
-
+	dstIndex, _ := findChunkPointerForKey(dstBlock, nil, dstHashReminder)
 	dstBlock.ChunkPointerStates[dstIndex] = objectlistV0.DefinedChunkState
 	dstBlock.ChunkPointers[dstIndex] = dstBlock.FreeChunkIndex
 	dstBlock.ObjectLinks[dstIndex] = objectID
