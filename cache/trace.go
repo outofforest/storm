@@ -2,10 +2,11 @@ package cache
 
 import (
 	"github.com/outofforest/storm/blocks"
-	pointerV0 "github.com/outofforest/storm/blocks/pointer/v0"
+	"github.com/outofforest/storm/blocks/pointer"
 )
 
 // TraceTag starts from origin and follows pointer blocks until the final leaf block is found.
+// TODO (wojciech): Create two versions of this function, one for read-only access, second one for updating (to save on ifs)
 func TraceTag[T blocks.Block](
 	c *Cache,
 	origin BlockOrigin,
@@ -13,7 +14,7 @@ func TraceTag[T blocks.Block](
 	tag uint64,
 ) (Trace[T], uint64, bool, error) {
 	currentOrigin := origin
-	pointerTrace := make([]Block[pointerV0.Block], 0, 11) // TODO (wojciech): Find the right size
+	pointerTrace := make([]Block[pointer.Block], 0, 11) // TODO (wojciech): Find the right size
 	tagReminder := tag
 
 	var pointerIndex uint64
@@ -36,12 +37,11 @@ func TraceTag[T blocks.Block](
 					leafBlock,
 				))
 
-				*currentOrigin.Pointer = pointerV0.Pointer{
+				*currentOrigin.Pointer = pointer.Pointer{
 					Address:       leafBlock.Address(),
 					BirthRevision: c.SingularityBlock().Revision + 1,
 				}
 				*currentOrigin.BlockType = blocks.LeafBlockType
-				*currentOrigin.BlockSchemaVersion = blocks.ObjectListV0
 
 				return Trace[T]{
 					PointerBlocks: pointerTrace,
@@ -83,10 +83,10 @@ func TraceTag[T blocks.Block](
 				}
 
 				tracedBlock.PointerBlocks = pointerTrace
-				tracedBlock.splitFunc = func(splitFunc func(newPointerBlock Block[pointerV0.Block]) error) (Block[T], uint64, error) {
+				tracedBlock.splitFunc = func(splitFunc func(newPointerBlock Block[pointer.Block]) error) (Block[T], uint64, error) {
 					leafBlock.IncrementReferences() // to prevent unloading until chunks are copied
 
-					newPointerBlock, err := NewBlock[pointerV0.Block](c)
+					newPointerBlock, err := NewBlock[pointer.Block](c)
 					if err != nil {
 						return Block[T]{}, 0, err
 					}
@@ -98,33 +98,30 @@ func TraceTag[T blocks.Block](
 
 					newPointerBlock.IncrementReferences()
 
-					*currentOrigin.Pointer = pointerV0.Pointer{
+					*currentOrigin.Pointer = pointer.Pointer{
 						Address:       newPointerBlock.Address(),
 						BirthRevision: newPointerBlock.BirthRevision(),
 					}
 					*currentOrigin.BlockType = blocks.PointerBlockType
-					*currentOrigin.BlockSchemaVersion = blocks.PointerV0
 
 					returnedBlock, err := NewBlock[T](c)
 					if err != nil {
 						return Block[T]{}, 0, err
 					}
 
-					returnedPointerIndex := tagReminder % pointerV0.PointersPerBlock
-					newPointerBlock.Block.Pointers[returnedPointerIndex] = pointerV0.Pointer{
+					returnedPointerIndex := tagReminder % pointer.PointersPerBlock
+					newPointerBlock.Block.Pointers[returnedPointerIndex] = pointer.Pointer{
 						Address:       returnedBlock.Address(),
 						BirthRevision: c.singularityBlock.V.Revision + 1,
 					}
 					newPointerBlock.Block.PointedBlockTypes[returnedPointerIndex] = blocks.LeafBlockType
-					newPointerBlock.Block.PointedBlockVersions[returnedPointerIndex] = blocks.ObjectListV0
 
 					returnedBlock.WithPostCommitFunc(NewLeafBlockPostCommitFunc(
 						c,
 						BlockOrigin{
-							PointerBlock:       newPointerBlock,
-							Pointer:            &newPointerBlock.Block.Pointers[returnedPointerIndex],
-							BlockType:          &newPointerBlock.Block.PointedBlockTypes[returnedPointerIndex],
-							BlockSchemaVersion: &newPointerBlock.Block.PointedBlockVersions[returnedPointerIndex],
+							PointerBlock: newPointerBlock,
+							Pointer:      &newPointerBlock.Block.Pointers[returnedPointerIndex],
+							BlockType:    &newPointerBlock.Block.PointedBlockTypes[returnedPointerIndex],
 						},
 						returnedBlock,
 					))
@@ -140,7 +137,7 @@ func TraceTag[T blocks.Block](
 
 					returnedBlock.DecrementReferences()
 
-					return returnedBlock, tagReminder / pointerV0.PointersPerBlock, nil
+					return returnedBlock, tagReminder / pointer.PointersPerBlock, nil
 				}
 			}
 
@@ -151,7 +148,7 @@ func TraceTag[T blocks.Block](
 				currentOrigin.PointerBlock.IncrementReferences()
 			}
 
-			nextPointerBlock, addedToCache, err := FetchBlock[pointerV0.Block](c, *currentOrigin.Pointer)
+			nextPointerBlock, addedToCache, err := FetchBlock[pointer.Block](c, *currentOrigin.Pointer)
 			if err != nil {
 				return Trace[T]{}, 0, false, err
 			}
@@ -172,29 +169,27 @@ func TraceTag[T blocks.Block](
 				}
 			}
 
-			pointerIndex = tagReminder % pointerV0.PointersPerBlock
-			tagReminder /= pointerV0.PointersPerBlock
+			pointerIndex = tagReminder % pointer.PointersPerBlock
+			tagReminder /= pointer.PointersPerBlock
 
 			currentOrigin.PointerBlock = nextPointerBlock
 			currentOrigin.Pointer = &nextPointerBlock.Block.Pointers[pointerIndex]
 			currentOrigin.BlockType = &nextPointerBlock.Block.PointedBlockTypes[pointerIndex]
-			currentOrigin.BlockSchemaVersion = &nextPointerBlock.Block.PointedBlockVersions[pointerIndex]
 		}
 	}
 }
 
 func (c *Cache) newPointerBlockPostCommitFunc(
 	origin BlockOrigin,
-	pointerBlock Block[pointerV0.Block],
+	pointerBlock Block[pointer.Block],
 ) func() error {
 	return func() error {
-		*origin.Pointer = pointerV0.Pointer{
+		*origin.Pointer = pointer.Pointer{
 			Checksum:      blocks.BlockChecksum(pointerBlock.Block),
 			Address:       pointerBlock.Address(),
 			BirthRevision: pointerBlock.BirthRevision(),
 		}
 		*origin.BlockType = blocks.PointerBlockType
-		*origin.BlockSchemaVersion = blocks.PointerV0
 
 		if origin.PointerBlock.IsValid() {
 			origin.PointerBlock.DecrementReferences()
@@ -215,13 +210,12 @@ func NewLeafBlockPostCommitFunc[T blocks.Block](
 	leafBlock Block[T],
 ) func() error {
 	return func() error {
-		*origin.Pointer = pointerV0.Pointer{
+		*origin.Pointer = pointer.Pointer{
 			Checksum:      blocks.BlockChecksum(leafBlock.Block),
 			Address:       leafBlock.Address(),
 			BirthRevision: leafBlock.BirthRevision(),
 		}
 		*origin.BlockType = blocks.LeafBlockType
-		*origin.BlockSchemaVersion = blocks.ObjectListV0
 
 		if origin.PointerBlock.IsValid() {
 			origin.PointerBlock.DecrementReferences()
@@ -236,14 +230,14 @@ func NewLeafBlockPostCommitFunc[T blocks.Block](
 
 // Trace stores the trace of incremented pointer blocks leading to the final leaf node
 type Trace[T blocks.Block] struct {
-	PointerBlocks []Block[pointerV0.Block]
+	PointerBlocks []Block[pointer.Block]
 	Origin        BlockOrigin
 	Block         Block[T]
 
-	splitFunc func(splitFunc func(newPointerBlock Block[pointerV0.Block]) error) (Block[T], uint64, error)
+	splitFunc func(splitFunc func(newPointerBlock Block[pointer.Block]) error) (Block[T], uint64, error)
 }
 
 // Split replaces a leaf block with a new pointer block and triggers redistribution of existing items between new set of leaf blocks.
-func (t Trace[T]) Split(splitFunc func(newPointerBlock Block[pointerV0.Block]) error) (Block[T], uint64, error) {
+func (t Trace[T]) Split(splitFunc func(newPointerBlock Block[pointer.Block]) error) (Block[T], uint64, error) {
 	return t.splitFunc(splitFunc)
 }

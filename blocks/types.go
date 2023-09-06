@@ -14,17 +14,6 @@ const (
 	LeafBlockType
 )
 
-// SchemaVersion defines version of the schema.
-type SchemaVersion uint16
-
-// Schema versions
-const (
-	SingularityV0 SchemaVersion = iota
-	PointerV0
-	ObjectListV0
-	BlobV0
-)
-
 // Hash represents hash.
 type Hash uint64
 

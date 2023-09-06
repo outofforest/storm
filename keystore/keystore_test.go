@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/outofforest/storm/blocks"
-	objectlistV0 "github.com/outofforest/storm/blocks/objectlist/v0"
+	"github.com/outofforest/storm/blocks/objectlist"
 	"github.com/outofforest/storm/cache"
 	"github.com/outofforest/storm/persistence"
 	"github.com/outofforest/storm/pkg/memdev"
@@ -72,7 +72,7 @@ func TestSetGet(t *testing.T) {
 func TestStoringBatches(t *testing.T) {
 	const (
 		nBatches  = 30
-		batchSize = 50 * objectlistV0.ChunksPerBlock
+		batchSize = 50 * objectlist.ChunksPerBlock
 	)
 
 	requireT := require.New(t)

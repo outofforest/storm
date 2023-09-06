@@ -1,4 +1,4 @@
-package v0
+package pointer
 
 import (
 	"github.com/outofforest/storm/blocks"
@@ -15,7 +15,6 @@ type Pointer struct {
 
 // Block is the block forming tree. It contains pointers to other blocks.
 type Block struct {
-	Pointers             [PointersPerBlock]Pointer
-	PointedBlockVersions [PointersPerBlock]blocks.SchemaVersion
-	PointedBlockTypes    [PointersPerBlock]blocks.BlockType
+	Pointers          [PointersPerBlock]Pointer
+	PointedBlockTypes [PointersPerBlock]blocks.BlockType
 }
