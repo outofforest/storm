@@ -36,7 +36,7 @@ func (s *Store) GetObjectID(key []byte) (blocks.ObjectID, bool, error) {
 	}
 
 	sBlock := s.c.SingularityBlock()
-	dataBlock, tagReminder, exists, _, err := cache.TraceTag[objectlistV0.Block](
+	dataBlock, tagReminder, exists, err := cache.TraceTag[objectlistV0.Block](
 		s.c,
 		cache.BlockOrigin{
 			Pointer:            &sBlock.RootData,
@@ -68,7 +68,7 @@ func (s *Store) EnsureObjectID(key []byte) (blocks.ObjectID, error) {
 	}
 
 	sBlock := s.c.SingularityBlock()
-	dataBlock, tagReminder, _, splitFunc, err := cache.TraceTag[objectlistV0.Block](
+	dataBlock, tagReminder, _, err := cache.TraceTag[objectlistV0.Block](
 		s.c,
 		cache.BlockOrigin{
 			Pointer:            &sBlock.RootData,
@@ -82,7 +82,7 @@ func (s *Store) EnsureObjectID(key []byte) (blocks.ObjectID, error) {
 		return 0, err
 	}
 
-	return s.ensureObjectID(sBlock, dataBlock, key, tagReminder, splitFunc)
+	return s.ensureObjectID(sBlock, dataBlock, key, tagReminder)
 }
 
 // Delete deletes key from the store.
@@ -96,7 +96,6 @@ func (s *Store) ensureObjectID(
 	block cache.Trace[objectlistV0.Block],
 	key []byte,
 	tagReminder uint64,
-	splitFunc func() (cache.Block[pointerV0.Block], error),
 ) (blocks.ObjectID, error) {
 	index, chunkFound := findChunkPointerForKey(block.Block.Block, key, tagReminder)
 	if chunkFound && block.Block.Block.ChunkPointerStates[index] == objectlistV0.DefinedChunkState {
@@ -109,20 +108,18 @@ func (s *Store) ensureObjectID(
 	if block.Block.Block.NUsedChunks >= objectlistV0.SplitTrigger {
 		// TODO (wojciech): Check if split is possible - if all the keys have the same hash then it is not.
 
-		oldBlock := *block.Block.Block
-		cache.InvalidateBlock(s.c, block.Block)
-
-		newPointerBlock, err := splitFunc()
+		var err error
+		block.Block, tagReminder, err = block.Split(func(newPointerBlock cache.Block[pointerV0.Block]) error {
+			return s.splitBlock(block.Block.Block, newPointerBlock)
+		})
 		if err != nil {
 			return 0, err
 		}
 
-		block.Block, err = s.splitBlock(oldBlock, newPointerBlock, tagReminder)
-		if err != nil {
-			return 0, err
+		if block.Block.Block.NUsedChunks == 0 {
+			initFreeChunkList(block.Block.Block)
 		}
 
-		tagReminder /= pointerV0.PointersPerBlock
 		index, chunkFound = findChunkPointerForKey(block.Block.Block, key, tagReminder)
 	}
 
@@ -145,38 +142,10 @@ func (s *Store) ensureObjectID(
 }
 
 func (s *Store) splitBlock(
-	block objectlistV0.Block,
+	block *objectlistV0.Block,
 	newPointerBlock cache.Block[pointerV0.Block],
-	tagReminder uint64,
-) (cache.Block[objectlistV0.Block], error) {
+) error {
 	sBlock := s.c.SingularityBlock()
-
-	newPointerBlock.IncrementReferences()
-	returnedBlock, err := cache.NewBlock[objectlistV0.Block](s.c)
-	if err != nil {
-		return cache.Block[objectlistV0.Block]{}, err
-	}
-
-	returnedPointerIndex := tagReminder % pointerV0.PointersPerBlock
-	newPointerBlock.Block.Pointers[returnedPointerIndex] = pointerV0.Pointer{
-		Address:       returnedBlock.Address(),
-		BirthRevision: sBlock.Revision + 1,
-	}
-	newPointerBlock.Block.PointedBlockTypes[returnedPointerIndex] = blocks.LeafBlockType
-	newPointerBlock.Block.PointedBlockVersions[returnedPointerIndex] = blocks.ObjectListV0
-
-	returnedBlock.WithPostCommitFunc(cache.NewLeafBlockPostCommitFunc(
-		s.c,
-		cache.BlockOrigin{
-			PointerBlock:       newPointerBlock,
-			Pointer:            &newPointerBlock.Block.Pointers[returnedPointerIndex],
-			BlockType:          &newPointerBlock.Block.PointedBlockTypes[returnedPointerIndex],
-			BlockSchemaVersion: &newPointerBlock.Block.PointedBlockVersions[returnedPointerIndex],
-		},
-		returnedBlock,
-	))
-	initFreeChunkList(returnedBlock.Block)
-
 	for i := uint16(0); i < objectlistV0.ChunksPerBlock; i++ {
 		if block.ChunkPointerStates[i] != objectlistV0.DefinedChunkState {
 			continue
@@ -189,7 +158,7 @@ func (s *Store) splitBlock(
 			var err error
 			newBlock, err = cache.NewBlock[objectlistV0.Block](s.c)
 			if err != nil {
-				return cache.Block[objectlistV0.Block]{}, err
+				return err
 			}
 
 			newBlock.WithPostCommitFunc(cache.NewLeafBlockPostCommitFunc(
@@ -218,7 +187,11 @@ func (s *Store) splitBlock(
 			var err error
 			newBlock, addedToCache, err = cache.FetchBlock[objectlistV0.Block](s.c, newPointerBlock.Block.Pointers[pointerIndex])
 			if err != nil {
-				return cache.Block[objectlistV0.Block]{}, err
+				return err
+			}
+
+			if newBlock.Block.NUsedChunks == 0 {
+				initFreeChunkList(newBlock.Block)
 			}
 
 			if addedToCache {
@@ -237,34 +210,13 @@ func (s *Store) splitBlock(
 			}
 		}
 
-		copyKeyChunksBetweenBlocks(newBlock.Block, &block, i)
+		copyKeyChunksBetweenBlocks(newBlock.Block, block, i)
 		if err := cache.DirtyBlock(s.c, newBlock); err != nil {
-			return cache.Block[objectlistV0.Block]{}, err
+			return err
 		}
 	}
 
-	newPointerBlock.IncrementReferences()
-	returnedBlock, addedToCache, err := cache.FetchBlock[objectlistV0.Block](s.c, newPointerBlock.Block.Pointers[returnedPointerIndex])
-	if err != nil {
-		return cache.Block[objectlistV0.Block]{}, err
-	}
-
-	if addedToCache {
-		returnedBlock.WithPostCommitFunc(cache.NewLeafBlockPostCommitFunc(
-			s.c,
-			cache.BlockOrigin{
-				PointerBlock:       newPointerBlock,
-				Pointer:            &newPointerBlock.Block.Pointers[returnedPointerIndex],
-				BlockType:          &newPointerBlock.Block.PointedBlockTypes[returnedPointerIndex],
-				BlockSchemaVersion: &newPointerBlock.Block.PointedBlockVersions[returnedPointerIndex],
-			},
-			returnedBlock,
-		))
-	} else {
-		newPointerBlock.DecrementReferences()
-	}
-
-	return returnedBlock, nil
+	return nil
 }
 
 func verifyKeyInChunks(key []byte, tagReminder uint64, block *objectlistV0.Block, index uint16) bool {
