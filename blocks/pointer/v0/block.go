@@ -18,6 +18,4 @@ type Block struct {
 	Pointers             [PointersPerBlock]Pointer
 	PointedBlockVersions [PointersPerBlock]blocks.SchemaVersion
 	PointedBlockTypes    [PointersPerBlock]blocks.BlockType
-
-	NUsedPointers uint16
 }
