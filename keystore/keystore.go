@@ -153,7 +153,6 @@ func (s *Store) splitBlock(
 		return cache.Block[objectlistV0.Block]{}, err
 	}
 
-	newPointerBlock.Block.NUsedPointers = 1
 	returnedPointerIndex := hashReminder % pointerV0.PointersPerBlock
 	newPointerBlock.Block.Pointers[returnedPointerIndex] = pointerV0.Pointer{
 		Address:       returnedBlock.Address(),
@@ -196,7 +195,6 @@ func (s *Store) splitBlock(
 				newBlock,
 			))
 
-			newPointerBlock.Block.NUsedPointers++
 			newPointerBlock.Block.Pointers[pointerIndex] = pointerV0.Pointer{
 				Address:       newBlock.Address(),
 				BirthRevision: sBlock.Revision + 1,
@@ -419,7 +417,6 @@ func lookupByKeyHash(
 			if forUpdate {
 				if currentPointerBlock.IsValid() {
 					currentPointerBlock.IncrementReferences()
-					currentPointerBlock.Block.NUsedPointers++
 					pointerTrace = append(pointerTrace, currentPointerBlock)
 				}
 
