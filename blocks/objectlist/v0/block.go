@@ -29,7 +29,7 @@ const (
 type Block struct {
 	Blob [ChunksPerBlock * ChunkSize]byte
 
-	KeyHashReminders   [ChunksPerBlock]uint64
+	KeyTagReminders    [ChunksPerBlock]uint64
 	ObjectLinks        [ChunksPerBlock]blocks.ObjectID
 	ChunkPointers      [ChunksPerBlock]uint16
 	NextChunkPointers  [ChunksPerBlock]uint16
