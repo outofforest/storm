@@ -32,13 +32,6 @@ type BlockOrigin struct {
 	BlockSchemaVersion *blocks.SchemaVersion
 }
 
-// Trace stores the trace of incremented pointer blocks leading to the final leaf node
-type Trace[T blocks.Block] struct {
-	PointerBlocks []Block[pointerV0.Block]
-	Origin        BlockOrigin
-	Block         Block[T]
-}
-
 // Block represents block stored in cache.
 type Block[T blocks.Block] struct {
 	meta  *metadata
