@@ -259,8 +259,8 @@ func FetchBlock[T blocks.Block](
 }
 
 // NewBlock returns structure representing new block of particular type.
-func NewBlock[T blocks.Block](cache *Cache) (Block[T], error) {
-	meta, err := cache.newBlock()
+func NewBlock[T blocks.Block](c *Cache) (Block[T], error) {
+	meta, err := c.newBlock()
 	if err != nil {
 		return Block[T]{}, err
 	}
@@ -278,14 +278,14 @@ func NewBlock[T blocks.Block](cache *Cache) (Block[T], error) {
 }
 
 // DirtyBlock marks blocks as dirty.
-func DirtyBlock[T blocks.Block](cache *Cache, block Block[T]) error {
-	cache.dirtyBlocks[block.meta] = struct{}{}
+func DirtyBlock[T blocks.Block](c *Cache, block Block[T]) error {
+	c.dirtyBlocks[block.meta] = struct{}{}
 	return nil
 }
 
 // InvalidateBlock marks block in cache as invalid.
-func InvalidateBlock[T blocks.Block](cache *Cache, block Block[T]) {
-	delete(cache.dirtyBlocks, block.meta)
+func InvalidateBlock[T blocks.Block](c *Cache, block Block[T]) {
+	delete(c.dirtyBlocks, block.meta)
 	block.meta.State = invalidBlockState
 	block.meta.PostCommitFunc = nil
 }
