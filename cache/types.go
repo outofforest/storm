@@ -2,7 +2,7 @@ package cache
 
 import (
 	"github.com/outofforest/storm/blocks"
-	pointerV0 "github.com/outofforest/storm/blocks/pointer/v0"
+	"github.com/outofforest/storm/blocks/pointer"
 )
 
 // blockState is the enum representing the state of the block.
@@ -26,10 +26,9 @@ type metadata struct {
 
 // BlockOrigin tracks information collected during traversing the tree up to the leaf block.
 type BlockOrigin struct {
-	PointerBlock       Block[pointerV0.Block]
-	Pointer            *pointerV0.Pointer
-	BlockType          *blocks.BlockType
-	BlockSchemaVersion *blocks.SchemaVersion
+	PointerBlock Block[pointer.Block]
+	Pointer      *pointer.Pointer
+	BlockType    *blocks.BlockType
 }
 
 // Block represents block stored in cache.

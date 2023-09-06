@@ -8,17 +8,17 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/outofforest/storm/blocks"
-	blobV0 "github.com/outofforest/storm/blocks/blob/v0"
-	objectlistV0 "github.com/outofforest/storm/blocks/objectlist/v0"
-	pointerV0 "github.com/outofforest/storm/blocks/pointer/v0"
-	singularityV0 "github.com/outofforest/storm/blocks/singularity/v0"
+	"github.com/outofforest/storm/blocks/blob"
+	"github.com/outofforest/storm/blocks/objectlist"
+	"github.com/outofforest/storm/blocks/pointer"
+	"github.com/outofforest/storm/blocks/singularity"
 )
 
 func TestBlockSizes(t *testing.T) {
-	assertDiskSize[singularityV0.Block](t)
-	assertDiskSize[pointerV0.Block](t)
-	assertDiskSize[objectlistV0.Block](t)
-	assertDiskSize[blobV0.Block[[blocks.BlockSize]byte]](t)
+	assertDiskSize[singularity.Block](t)
+	assertDiskSize[pointer.Block](t)
+	assertDiskSize[objectlist.Block](t)
+	assertDiskSize[blob.Block[[blocks.BlockSize]byte]](t)
 }
 
 func assertDiskSize[T blocks.Block](t *testing.T) {

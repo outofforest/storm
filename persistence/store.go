@@ -7,7 +7,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/outofforest/storm/blocks"
-	singularityV0 "github.com/outofforest/storm/blocks/singularity/v0"
+	"github.com/outofforest/storm/blocks/singularity"
 )
 
 // Store represents persistent storage.
@@ -70,7 +70,7 @@ func (s *Store) Sync() error {
 	return s.dev.Sync()
 }
 
-func validateSingularityBlock(address blocks.BlockAddress, sBlock singularityV0.Block) error {
+func validateSingularityBlock(address blocks.BlockAddress, sBlock singularity.Block) error {
 	if sBlock.StormID&stormSubject != stormSubject {
 		return errors.New("device does not contain storm storage system")
 	}

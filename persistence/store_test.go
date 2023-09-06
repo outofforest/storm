@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/outofforest/storm/blocks"
-	singularityV0 "github.com/outofforest/storm/blocks/singularity/v0"
+	"github.com/outofforest/storm/blocks/singularity"
 	"github.com/outofforest/storm/pkg/memdev"
 )
 
@@ -34,7 +34,7 @@ func TestInvalidChecksum(t *testing.T) {
 
 	// Set invalid checksum
 
-	sBlock := photon.NewFromValue(&singularityV0.Block{})
+	sBlock := photon.NewFromValue(&singularity.Block{})
 	requireT.NoError(store.ReadBlock(0, sBlock.B))
 
 	sBlock.V.Checksum = 0
@@ -58,7 +58,7 @@ func TestInvalidBlockNumber(t *testing.T) {
 
 	// Set invalid number of blocks
 
-	sBlock := photon.NewFromValue(&singularityV0.Block{})
+	sBlock := photon.NewFromValue(&singularity.Block{})
 	requireT.NoError(store.ReadBlock(0, sBlock.B))
 
 	sBlock.V.NBlocks++
@@ -83,7 +83,7 @@ func TestExpandingDevWorks(t *testing.T) {
 
 	// Set lower number of blocks to simulate device being expanded
 
-	sBlock := photon.NewFromValue(&singularityV0.Block{})
+	sBlock := photon.NewFromValue(&singularity.Block{})
 	requireT.NoError(store.ReadBlock(0, sBlock.B))
 
 	sBlock.V.NBlocks--

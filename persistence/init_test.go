@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/outofforest/storm/blocks"
-	singularityV0 "github.com/outofforest/storm/blocks/singularity/v0"
+	"github.com/outofforest/storm/blocks/singularity"
 	"github.com/outofforest/storm/pkg/memdev"
 )
 
@@ -23,14 +23,13 @@ func TestInit(t *testing.T) {
 	_, err := dev.Seek(0, io.SeekStart)
 	requireT.NoError(err)
 
-	sBlock := photon.NewFromValue(&singularityV0.Block{})
+	sBlock := photon.NewFromValue(&singularity.Block{})
 	_, err = dev.Read(sBlock.B)
 	requireT.NoError(err)
 
 	checksum := sBlock.V.Checksum
 	sBlock.V.Checksum = 0
 
-	requireT.EqualValues(blocks.SingularityV0, sBlock.V.SchemaVersion)
 	requireT.EqualValues(stormSubject, sBlock.V.StormID&stormSubject)
 	requireT.EqualValues(0, sBlock.V.Revision)
 	requireT.EqualValues(dev.Size()/blocks.BlockSize, int64(sBlock.V.NBlocks))
@@ -50,7 +49,7 @@ func TestOverwrite(t *testing.T) {
 	_, err := dev.Seek(0, io.SeekStart)
 	requireT.NoError(err)
 
-	previousSBlock := photon.NewFromValue(&singularityV0.Block{})
+	previousSBlock := photon.NewFromValue(&singularity.Block{})
 	_, err = dev.Read(previousSBlock.B)
 	requireT.NoError(err)
 
@@ -59,7 +58,7 @@ func TestOverwrite(t *testing.T) {
 	_, err = dev.Seek(0, io.SeekStart)
 	requireT.NoError(err)
 
-	sameSBlock := photon.NewFromValue(&singularityV0.Block{})
+	sameSBlock := photon.NewFromValue(&singularity.Block{})
 	_, err = dev.Read(sameSBlock.B)
 	requireT.NoError(err)
 	requireT.Equal(previousSBlock.V, sameSBlock.V)
@@ -69,10 +68,9 @@ func TestOverwrite(t *testing.T) {
 	_, err = dev.Seek(0, io.SeekStart)
 	requireT.NoError(err)
 
-	newSBlock := photon.NewFromValue(&singularityV0.Block{})
+	newSBlock := photon.NewFromValue(&singularity.Block{})
 	_, err = dev.Read(newSBlock.B)
 	requireT.NoError(err)
-	requireT.Equal(previousSBlock.V.SchemaVersion, newSBlock.V.SchemaVersion)
 	requireT.NotEqual(previousSBlock.V.Checksum, newSBlock.V.Checksum)
 	requireT.NotEqual(previousSBlock.V.StormID, newSBlock.V.StormID)
 	requireT.Equal(previousSBlock.V.NBlocks, newSBlock.V.NBlocks)

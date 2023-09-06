@@ -8,7 +8,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/outofforest/storm/blocks"
-	singularityV0 "github.com/outofforest/storm/blocks/singularity/v0"
+	"github.com/outofforest/storm/blocks/singularity"
 )
 
 const (
@@ -37,10 +37,9 @@ func Initialize(dev Dev, overwrite bool) error {
 		return err
 	}
 
-	sBlock := photon.NewFromValue(&singularityV0.Block{
-		SchemaVersion: blocks.SingularityV0,
-		StormID:       rand.Uint64() | stormSubject,
-		NBlocks:       uint64(dev.Size() / blocks.BlockSize),
+	sBlock := photon.NewFromValue(&singularity.Block{
+		StormID: rand.Uint64() | stormSubject,
+		NBlocks: uint64(dev.Size() / blocks.BlockSize),
 	})
 	sBlock.V.Checksum = blocks.BlockChecksum(sBlock.V)
 
@@ -77,15 +76,15 @@ func validateDev(dev Dev, overwrite bool) error {
 }
 
 //nolint:unparam // returned bock address won't be always 0 in the future
-func loadSingularityBlock(dev Dev) (blocks.BlockAddress, singularityV0.Block, error) {
+func loadSingularityBlock(dev Dev) (blocks.BlockAddress, singularity.Block, error) {
 	var address blocks.BlockAddress
 	if _, err := dev.Seek(int64(address)*blocks.BlockSize, io.SeekStart); err != nil {
-		return 0, singularityV0.Block{}, err
+		return 0, singularity.Block{}, err
 	}
 
-	sBlock := photon.NewFromBytes[singularityV0.Block](make([]byte, blocks.BlockSize))
+	sBlock := photon.NewFromBytes[singularity.Block](make([]byte, blocks.BlockSize))
 	if _, err := dev.Read(sBlock.B); err != nil {
-		return 0, singularityV0.Block{}, err
+		return 0, singularity.Block{}, err
 	}
 
 	return address, *sBlock.V, nil

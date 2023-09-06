@@ -8,8 +8,8 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/outofforest/storm/blocks"
-	pointerV0 "github.com/outofforest/storm/blocks/pointer/v0"
-	singularityV0 "github.com/outofforest/storm/blocks/singularity/v0"
+	"github.com/outofforest/storm/blocks/pointer"
+	"github.com/outofforest/storm/blocks/singularity"
 	"github.com/outofforest/storm/persistence"
 )
 
@@ -23,12 +23,12 @@ type Cache struct {
 	blocks            []metadata
 	addressingOffsets []uint64
 	dirtyBlocks       map[*metadata]struct{} // TODO (wojciech): Limit the number of dirty blocks
-	singularityBlock  photon.Union[*singularityV0.Block]
+	singularityBlock  photon.Union[*singularity.Block]
 }
 
 // New creates new cache.
 func New(store *persistence.Store, size int64) (*Cache, error) {
-	sBlock := photon.NewFromValue(&singularityV0.Block{})
+	sBlock := photon.NewFromValue(&singularity.Block{})
 	if err := store.ReadBlock(0, sBlock.B); err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func New(store *persistence.Store, size int64) (*Cache, error) {
 }
 
 // SingularityBlock returns current singularity block.
-func (c *Cache) SingularityBlock() *singularityV0.Block {
+func (c *Cache) SingularityBlock() *singularity.Block {
 	return c.singularityBlock.V
 }
 
@@ -244,7 +244,7 @@ loop:
 // FetchBlock returns structure representing existing block of particular type.
 func FetchBlock[T blocks.Block](
 	cache *Cache,
-	pointer pointerV0.Pointer,
+	pointer pointer.Pointer,
 ) (Block[T], bool, error) {
 	var v T
 	meta, err := cache.fetchBlock(pointer.Address, pointer.BirthRevision, int64(unsafe.Sizeof(v)), pointer.Checksum)

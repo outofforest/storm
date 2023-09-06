@@ -1,4 +1,4 @@
-package v0
+package objectlist
 
 import (
 	"github.com/outofforest/storm/blocks"
