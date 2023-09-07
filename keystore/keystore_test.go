@@ -77,7 +77,7 @@ func TestStoringBatches(t *testing.T) {
 
 	requireT := require.New(t)
 
-	dev := memdev.New(2048 * 1024 * 1024)
+	dev := memdev.New(1024 * 1024 * 1024)
 	requireT.NoError(persistence.Initialize(dev, false))
 
 	s, err := persistence.OpenStore(dev)
