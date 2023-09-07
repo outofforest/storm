@@ -6,8 +6,8 @@ import (
 
 // Object represents an object in the blob.
 type Object[T comparable] struct {
-	ObjectID blocks.ObjectID
-	Object   T
+	ObjectIDTagReminder blocks.ObjectID
+	Object              T
 }
 
 // Block contains any data.
