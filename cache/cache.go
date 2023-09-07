@@ -241,6 +241,16 @@ loop:
 	return meta, nil
 }
 
+func (c *Cache) dirtyBlock(meta *metadata) {
+	c.dirtyBlocks[meta] = struct{}{}
+}
+
+func (c *Cache) invalidateBlock(meta *metadata) {
+	delete(c.dirtyBlocks, meta)
+	meta.State = invalidBlockState
+	meta.PostCommitFunc = nil
+}
+
 // FetchBlock returns structure representing existing block of particular type.
 func FetchBlock[T blocks.Block](
 	cache *Cache,
@@ -275,17 +285,4 @@ func NewBlock[T blocks.Block](c *Cache) (Block[T], error) {
 		meta:  meta,
 		Block: p.V,
 	}, nil
-}
-
-// DirtyBlock marks blocks as dirty.
-func DirtyBlock[T blocks.Block](c *Cache, block Block[T]) error {
-	c.dirtyBlocks[block.meta] = struct{}{}
-	return nil
-}
-
-// InvalidateBlock marks block in cache as invalid.
-func InvalidateBlock[T blocks.Block](c *Cache, block Block[T]) {
-	delete(c.dirtyBlocks, block.meta)
-	block.meta.State = invalidBlockState
-	block.meta.PostCommitFunc = nil
 }

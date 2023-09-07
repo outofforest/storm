@@ -80,9 +80,7 @@ func (s *Store) EnsureObjectID(key []byte) (blocks.ObjectID, error) {
 
 	index, chunkFound := findChunkPointerForKey(block.Block.Block, key, tagReminder)
 	if chunkFound && block.Block.Block.ChunkPointerStates[index] == objectlist.DefinedChunkState {
-		for _, pointerBlock := range block.PointerBlocks {
-			pointerBlock.DecrementReferences()
-		}
+		block.Release()
 		return block.Block.Block.ObjectLinks[index], nil
 	}
 
@@ -113,11 +111,9 @@ func (s *Store) EnsureObjectID(key []byte) (blocks.ObjectID, error) {
 	}
 
 	block.Block.Block.ObjectLinks[index] = sBlock.NextObjectID
-	if err := cache.DirtyBlock(s.c, block.Block); err != nil {
-		return 0, err
-	}
-
 	sBlock.NextObjectID++
+
+	block.Commit()
 
 	return block.Block.Block.ObjectLinks[index], nil
 }
