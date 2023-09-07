@@ -186,25 +186,20 @@ func findChunkPointerForKey(
 		index := (chunkOffsetSeed + objectlist.AddressingOffsets[i]) % objectlist.ChunksPerBlock
 		switch block.ChunkPointerStates[index] {
 		case objectlist.DefinedChunkState:
-			if key == nil || !verifyKeyInChunks(key, tagReminder, block, index) {
-				continue
+			if key != nil && verifyKeyInChunks(key, tagReminder, block, index) {
+				return index, true
 			}
 		case objectlist.InvalidChunkState:
 			if !invalidChunkFound {
 				invalidChunkFound = true
 				invalidChunkIndex = index
 			}
-			continue
 		case objectlist.FreeChunkState:
 			if invalidChunkFound {
 				return invalidChunkIndex, true
 			}
+			return index, true
 		}
-		return index, true
-	}
-
-	if invalidChunkFound {
-		return invalidChunkIndex, true
 	}
 
 	return 0, false

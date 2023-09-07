@@ -1,175 +1,144 @@
 package objectstore
 
 import (
+	"github.com/outofforest/photon"
 	"github.com/pkg/errors"
 
 	"github.com/outofforest/storm/blocks"
-	"github.com/outofforest/storm/blocks/addresslist"
-	"github.com/outofforest/storm/blocks/objectlist"
+	"github.com/outofforest/storm/blocks/blob"
 	"github.com/outofforest/storm/cache"
 )
 
 // TODO (wojciech): Implement deleting keys
 
-// GetAddress returns address stored under the object ID.
-func GetAddress(
+// GetObject returns object by its ID.
+func GetObject[T comparable](
 	c *cache.Cache,
 	origin cache.BlockOrigin,
+	objectsPerBlock int,
 	objectID blocks.ObjectID,
-) (cache.BlockOrigin, bool, error) {
-	block, tagReminder, exists, err := cache.TraceTagForReading[addresslist.Block](
+) (T, bool, error) {
+	block, tagReminder, exists, err := cache.TraceTagForReading[blob.Block[blob.Object[T]]](
 		c,
 		origin,
 		uint64(objectID),
 	)
 	if !exists || err != nil {
-		return cache.BlockOrigin{}, false, err
+		var t T
+		return t, false, err
 	}
 
-	index, slotFound := findSlotForObjectID(block, tagReminder)
-	if slotFound && block.SlotStates[index] == addresslist.DefinedSlotState {
-		// TODO (wojciech): PointerBlock in the origin must be set, so it is incremented to not be unloaded from cache,
-		// so it is required to create an abstraction for this.
-		return cache.BlockOrigin{
-			Pointer:   &block.Slots[index].Pointer,
-			BlockType: &block.BlockTypes[index],
-		}, true, nil
+	objectSlot := findObject[T](block, objectsPerBlock, tagReminder)
+	if objectSlot != nil && objectSlot.State == blob.DefinedObjectState {
+		return objectSlot.Object, true, nil
 	}
 
-	return cache.BlockOrigin{}, false, nil
+	var t T
+	return t, false, nil
 }
 
-// EnsureObjectID returns object ID for key. If the object ID does not exist it is created.
-func EnsureObjectID(
+// SetObject sets object by its ID.
+func SetObject[T comparable](
 	c *cache.Cache,
 	origin cache.BlockOrigin,
+	objectsPerBlock int,
 	objectID blocks.ObjectID,
-) (cache.BlockOrigin, error) {
-	block, tagReminder, _, err := cache.TraceTagForUpdating[addresslist.Block](
+	object T,
+) error {
+	block, tagReminder, _, err := cache.TraceTagForUpdating[blob.Block[blob.Object[T]]](
 		c,
 		origin,
 		uint64(objectID),
 	)
 	if err != nil {
-		return cache.BlockOrigin{}, err
+		return err
 	}
 
-	index, slotFound := findSlotForObjectID(block.Block.Block, tagReminder)
-	if slotFound && block.Block.Block.SlotStates[index] == addresslist.DefinedSlotState {
-		block.Release()
-		// TODO (wojciech): PointerBlock in the origin must be set, so it is incremented to not be unloaded from cache,
-		// so it is required to create an abstraction for this.
-		return cache.BlockOrigin{
-			Pointer:   &block.Block.Block.Slots[index].Pointer,
-			BlockType: &block.Block.Block.BlockTypes[index],
-		}, nil
-	}
-
-	if block.Block.Block.NUsedSlots >= addresslist.SplitTrigger {
-		// TODO (wojciech): Check if split is possible - if all the keys have the same hash then it is not.
+	objects := photon.SliceFromBytes[blob.Object[T]](block.Block.Block.Data[:], objectsPerBlock)
+	if block.Block.Block.NUsedSlots >= uint64(len(objects))*3/4 {
+		// TODO (wojciech): Check if split makes sense, if it is the last level, then it doesn't
 
 		var err error
-		block.Block, tagReminder, err = block.Split(func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*addresslist.Block, uint64, error)) error {
-			return splitBlock(block.Block.Block, newBlockForTagReminderFunc)
+		block.Block, tagReminder, err = block.Split(func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*blob.Block[blob.Object[T]], uint64, error)) error {
+			return splitBlock(block.Block.Block, objectsPerBlock, newBlockForTagReminderFunc)
 		})
 		if err != nil {
-			return cache.BlockOrigin{}, err
+			return err
 		}
-
-		index, slotFound = findSlotForObjectID(block.Block.Block, tagReminder)
 	}
 
-	if !slotFound {
-		return cache.BlockOrigin{}, errors.Errorf("cannot find slot for object ID %x", objectID)
+	objectSlot := findObject[T](block.Block.Block, objectsPerBlock, tagReminder)
+	if objectSlot == nil {
+		return errors.Errorf("cannot find slot for object ID %x", objectID)
 	}
 
-	// TODO (wojciech): Set PostCommitFunc
-	newBlock, err := cache.NewBlock[addresslist.Block](c)
-	if err != nil {
-		return cache.BlockOrigin{}, err
+	objectSlot.Object = object
+	if objectSlot.State != blob.DefinedObjectState {
+		block.Block.Block.NUsedSlots++
+		objectSlot.ObjectIDTagReminder = tagReminder
+		objectSlot.State = blob.DefinedObjectState
 	}
 
-	block.Block.Block.NUsedSlots++
-	block.Block.Block.Slots[index] = addresslist.Slot{
-		ObjectIDTagReminder: tagReminder,
-		Pointer: blocks.Pointer{
-			Address:       newBlock.Address(),
-			BirthRevision: newBlock.BirthRevision(),
-		},
-	}
-	block.Block.Block.BlockTypes[index] = blocks.LeafBlockType
-	block.Block.Block.SlotStates[index] = addresslist.DefinedSlotState
+	block.Commit()
 
-	// TODO (wojciech): PointerBlock in the origin must be set, so it is incremented to not be unloaded from cache,
-	// so it is required to create an abstraction for this.
-	return cache.BlockOrigin{
-		Pointer:   &block.Block.Block.Slots[index].Pointer,
-		BlockType: &block.Block.Block.BlockTypes[index],
-	}, nil
+	return nil
 }
 
-func findSlotForObjectID(
-	block *addresslist.Block,
+func findObject[T comparable](
+	block *blob.Block[blob.Object[T]],
+	objectsPerBlock int,
 	tagReminder uint64,
-) (uint16, bool) {
+) *blob.Object[T] {
 	var invalidChunkFound bool
-	var invalidChunkIndex uint16
+	var invalidChunkIndex uint64
 
-	offsetSeed := uint16(tagReminder % addresslist.SlotsPerBlock)
-	for i := 0; i < addresslist.SlotsPerBlock; i++ {
-		index := (offsetSeed + objectlist.AddressingOffsets[i]) % addresslist.SlotsPerBlock
-		switch block.SlotStates[index] {
-		case addresslist.DefinedSlotState:
-			if block.Slots[index].ObjectIDTagReminder != tagReminder {
-				continue
+	objects := photon.SliceFromBytes[blob.Object[T]](block.Data[:], objectsPerBlock)
+	startIndex := tagReminder % uint64(len(objects))
+	// TODO (wojciech): Find better open addressing scheme
+	for i, j := startIndex, 0; j < len(objects); i, j = (i+1)%uint64(len(objects)), j+1 {
+		switch objects[i].State {
+		case blob.DefinedObjectState:
+			if objects[i].ObjectIDTagReminder == tagReminder {
+				return &objects[i]
 			}
-		case addresslist.InvalidSlotState:
+		case blob.InvalidObjectState:
 			if !invalidChunkFound {
 				invalidChunkFound = true
-				invalidChunkIndex = index
+				invalidChunkIndex = i
 			}
-			continue
-		case addresslist.FreeSlotState:
+		case blob.FreeObjectState:
 			if invalidChunkFound {
-				return invalidChunkIndex, true
+				return &objects[invalidChunkIndex]
 			}
+			return &objects[i]
 		}
-		return index, true
 	}
 
-	if invalidChunkFound {
-		return invalidChunkIndex, true
-	}
-
-	return 0, false
+	return nil
 }
 
-func splitBlock(
-	block *addresslist.Block,
-	newBlockForTagReminderFunc func(oldTagReminder uint64) (*addresslist.Block, uint64, error),
+func splitBlock[T comparable](
+	block *blob.Block[blob.Object[T]],
+	objectsPerBlock int,
+	newBlockForTagReminderFunc func(oldTagReminder uint64) (*blob.Block[blob.Object[T]], uint64, error),
 ) error {
-	for i := uint16(0); i < addresslist.SlotsPerBlock; i++ {
-		if block.SlotStates[i] != addresslist.DefinedSlotState {
+	objects := photon.SliceFromBytes[blob.Object[T]](block.Data[:], objectsPerBlock)
+	for i := 0; i < objectsPerBlock; i++ {
+		if objects[i].State != blob.DefinedObjectState {
 			continue
 		}
 
-		newBlock, newTagReminder, err := newBlockForTagReminderFunc(block.Slots[i].ObjectIDTagReminder)
+		newBlock, newTagReminder, err := newBlockForTagReminderFunc(objects[i].ObjectIDTagReminder)
 		if err != nil {
 			return err
 		}
 
-		index, _ := findSlotForObjectID(newBlock, newTagReminder)
+		objectSlot := findObject[T](newBlock, objectsPerBlock, newTagReminder)
 
 		newBlock.NUsedSlots++
-		newBlock.Slots[index] = addresslist.Slot{
-			ObjectIDTagReminder: newTagReminder,
-			Pointer: blocks.Pointer{
-				Address:       block.Slots[i].Pointer.Address,
-				BirthRevision: block.Slots[i].Pointer.BirthRevision,
-			},
-		}
-		newBlock.BlockTypes[index] = blocks.LeafBlockType
-		newBlock.SlotStates[index] = addresslist.DefinedSlotState
+		objectSlot.Object = objects[i].Object
+		objectSlot.ObjectIDTagReminder = newTagReminder
+		objectSlot.State = blob.DefinedObjectState
 	}
 
 	return nil
