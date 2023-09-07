@@ -263,7 +263,7 @@ func FetchBlock[T blocks.Block](
 
 	return Block[T]{
 		meta:  meta,
-		Block: photon.NewFromBytes[T](meta.Data).V,
+		Block: photon.FromBytes[T](meta.Data),
 	}, meta.PostCommitFunc == nil, nil
 }
 
