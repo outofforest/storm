@@ -179,7 +179,7 @@ func (s *Store) splitBlock(
 
 			var addedToCache bool
 			var err error
-			newBlock, addedToCache, err = cache.FetchBlock[objectlist.Block](s.c, newPointerBlock.Block.Pointers[pointerIndex])
+			newBlock, addedToCache, err = cache.FetchBlock[objectlist.Block](s.c, &newPointerBlock.Block.Pointers[pointerIndex])
 			if err != nil {
 				return err
 			}
