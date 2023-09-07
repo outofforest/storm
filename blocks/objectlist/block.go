@@ -18,7 +18,7 @@ const (
 // ChunkState defines the state of the chunk.
 type ChunkState byte
 
-// Item states.
+// Chunk states.
 const (
 	FreeChunkState ChunkState = iota
 	DefinedChunkState

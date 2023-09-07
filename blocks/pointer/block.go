@@ -6,15 +6,8 @@ import (
 
 // TODO (wojciech): Hash data separately
 
-// Pointer is a pointer to other block.
-type Pointer struct {
-	Checksum      blocks.Hash
-	Address       blocks.BlockAddress
-	BirthRevision uint64
-}
-
 // Block is the block forming tree. It contains pointers to other blocks.
 type Block struct {
-	Pointers          [PointersPerBlock]Pointer
+	Pointers          [PointersPerBlock]blocks.Pointer
 	PointedBlockTypes [PointersPerBlock]blocks.BlockType
 }
