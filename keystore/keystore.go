@@ -9,9 +9,10 @@ import (
 
 	"github.com/outofforest/storm/blocks"
 	"github.com/outofforest/storm/blocks/objectlist"
-	"github.com/outofforest/storm/blocks/singularity"
 	"github.com/outofforest/storm/cache"
 )
+
+// TODO (wojciech): Implement deleting keys
 
 // Store represents the key store keeping the relation between keys and object IDs.
 type Store struct {
@@ -65,7 +66,7 @@ func (s *Store) EnsureObjectID(key []byte) (blocks.ObjectID, error) {
 	}
 
 	sBlock := s.c.SingularityBlock()
-	dataBlock, tagReminder, _, err := cache.TraceTagForUpdating[objectlist.Block](
+	block, tagReminder, _, err := cache.TraceTagForUpdating[objectlist.Block](
 		s.c,
 		cache.BlockOrigin{
 			Pointer:   &sBlock.RootData,
@@ -77,21 +78,6 @@ func (s *Store) EnsureObjectID(key []byte) (blocks.ObjectID, error) {
 		return 0, err
 	}
 
-	return s.ensureObjectID(sBlock, dataBlock, key, tagReminder)
-}
-
-// Delete deletes key from the store.
-func (s *Store) Delete(key [32]byte) error {
-	// TODO (wojciech): To be implemented
-	return nil
-}
-
-func (s *Store) ensureObjectID(
-	sBlock *singularity.Block,
-	block cache.Trace[objectlist.Block],
-	key []byte,
-	tagReminder uint64,
-) (blocks.ObjectID, error) {
 	index, chunkFound := findChunkPointerForKey(block.Block.Block, key, tagReminder)
 	if chunkFound && block.Block.Block.ChunkPointerStates[index] == objectlist.DefinedChunkState {
 		for _, pointerBlock := range block.PointerBlocks {
@@ -134,30 +120,6 @@ func (s *Store) ensureObjectID(
 	sBlock.NextObjectID++
 
 	return block.Block.Block.ObjectLinks[index], nil
-}
-
-func (s *Store) splitBlock(
-	block *objectlist.Block,
-	newBlockForTagReminderFunc func(oldTagReminder uint64) (*objectlist.Block, uint64, error),
-) error {
-	for i := uint16(0); i < objectlist.ChunksPerBlock; i++ {
-		if block.ChunkPointerStates[i] != objectlist.DefinedChunkState {
-			continue
-		}
-
-		newBlock, newTagReminder, err := newBlockForTagReminderFunc(block.KeyTagReminders[i])
-		if err != nil {
-			return err
-		}
-
-		if newBlock.NUsedChunks == 0 {
-			initFreeChunkList(newBlock)
-		}
-
-		copyKeyChunksBetweenBlocks(newBlock, newTagReminder, block, i)
-	}
-
-	return nil
 }
 
 func verifyKeyInChunks(key []byte, tagReminder uint64, block *objectlist.Block, index uint16) bool {
@@ -267,6 +229,30 @@ func initFreeChunkList(block *objectlist.Block) {
 	for i := uint16(0); i < objectlist.ChunksPerBlock; i++ {
 		block.NextChunkPointers[i] = i + 1
 	}
+}
+
+func (s *Store) splitBlock(
+	block *objectlist.Block,
+	newBlockForTagReminderFunc func(oldTagReminder uint64) (*objectlist.Block, uint64, error),
+) error {
+	for i := uint16(0); i < objectlist.ChunksPerBlock; i++ {
+		if block.ChunkPointerStates[i] != objectlist.DefinedChunkState {
+			continue
+		}
+
+		newBlock, newTagReminder, err := newBlockForTagReminderFunc(block.KeyTagReminders[i])
+		if err != nil {
+			return err
+		}
+
+		if newBlock.NUsedChunks == 0 {
+			initFreeChunkList(newBlock)
+		}
+
+		copyKeyChunksBetweenBlocks(newBlock, newTagReminder, block, i)
+	}
+
+	return nil
 }
 
 func copyKeyChunksBetweenBlocks(dstBlock *objectlist.Block, dstTagReminder uint64, srcBlock *objectlist.Block, srcIndex uint16) {
