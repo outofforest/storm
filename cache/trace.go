@@ -70,7 +70,7 @@ func TraceTagForUpdating[T blocks.Block](
 				leafBlock,
 			))
 
-			*currentOrigin.Pointer = pointer.Pointer{
+			*currentOrigin.Pointer = blocks.Pointer{
 				Address:       leafBlock.Address(),
 				BirthRevision: c.SingularityBlock().Revision + 1,
 			}
@@ -130,7 +130,7 @@ func TraceTagForUpdating[T blocks.Block](
 
 				newPointerBlock.IncrementReferences()
 
-				*currentOrigin.Pointer = pointer.Pointer{
+				*currentOrigin.Pointer = blocks.Pointer{
 					Address:       newPointerBlock.Address(),
 					BirthRevision: newPointerBlock.BirthRevision(),
 				}
@@ -142,7 +142,7 @@ func TraceTagForUpdating[T blocks.Block](
 				}
 
 				returnedPointerIndex := tagReminder % pointer.PointersPerBlock
-				newPointerBlock.Block.Pointers[returnedPointerIndex] = pointer.Pointer{
+				newPointerBlock.Block.Pointers[returnedPointerIndex] = blocks.Pointer{
 					Address:       returnedBlock.Address(),
 					BirthRevision: c.singularityBlock.V.Revision + 1,
 				}
@@ -181,7 +181,7 @@ func TraceTagForUpdating[T blocks.Block](
 							newBlock,
 						))
 
-						newPointerBlock.Block.Pointers[pointerIndex] = pointer.Pointer{
+						newPointerBlock.Block.Pointers[pointerIndex] = blocks.Pointer{
 							Address:       newBlock.Address(),
 							BirthRevision: newBlock.BirthRevision(),
 						}
@@ -268,7 +268,7 @@ func (c *Cache) newPointerBlockPostCommitFunc(
 	pointerBlock Block[pointer.Block],
 ) func() error {
 	return func() error {
-		*origin.Pointer = pointer.Pointer{
+		*origin.Pointer = blocks.Pointer{
 			Checksum:      blocks.BlockChecksum(pointerBlock.Block),
 			Address:       pointerBlock.Address(),
 			BirthRevision: pointerBlock.BirthRevision(),
@@ -291,7 +291,7 @@ func newLeafBlockPostCommitFunc[T blocks.Block](
 	leafBlock Block[T],
 ) func() error {
 	return func() error {
-		*origin.Pointer = pointer.Pointer{
+		*origin.Pointer = blocks.Pointer{
 			Checksum:      blocks.BlockChecksum(leafBlock.Block),
 			Address:       leafBlock.Address(),
 			BirthRevision: leafBlock.BirthRevision(),

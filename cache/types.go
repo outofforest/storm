@@ -27,7 +27,7 @@ type metadata struct {
 // BlockOrigin tracks information collected during traversing the tree up to the leaf block.
 type BlockOrigin struct {
 	PointerBlock Block[pointer.Block]
-	Pointer      *pointer.Pointer
+	Pointer      *blocks.Pointer
 	BlockType    *blocks.BlockType
 }
 

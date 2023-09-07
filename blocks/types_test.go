@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/outofforest/storm/blocks"
+	"github.com/outofforest/storm/blocks/addresslist"
 	"github.com/outofforest/storm/blocks/blob"
 	"github.com/outofforest/storm/blocks/objectlist"
 	"github.com/outofforest/storm/blocks/pointer"
@@ -18,6 +19,7 @@ func TestBlockSizes(t *testing.T) {
 	assertDiskSize[singularity.Block](t)
 	assertDiskSize[pointer.Block](t)
 	assertDiskSize[objectlist.Block](t)
+	assertDiskSize[addresslist.Block](t)
 	assertDiskSize[blob.Block[[blocks.BlockSize]byte]](t)
 }
 

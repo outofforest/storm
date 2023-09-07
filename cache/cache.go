@@ -8,7 +8,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/outofforest/storm/blocks"
-	"github.com/outofforest/storm/blocks/pointer"
 	"github.com/outofforest/storm/blocks/singularity"
 	"github.com/outofforest/storm/persistence"
 )
@@ -254,7 +253,7 @@ func (c *Cache) invalidateBlock(meta *metadata) {
 // FetchBlock returns structure representing existing block of particular type.
 func FetchBlock[T blocks.Block](
 	cache *Cache,
-	pointer *pointer.Pointer,
+	pointer *blocks.Pointer,
 ) (Block[T], bool, error) {
 	var v T
 	meta, err := cache.fetchBlock(pointer.Address, pointer.BirthRevision, int64(unsafe.Sizeof(v)), pointer.Checksum)
