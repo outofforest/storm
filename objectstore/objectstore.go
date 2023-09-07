@@ -18,7 +18,7 @@ func GetObject[T comparable](
 	objectsPerBlock int,
 	objectID blocks.ObjectID,
 ) (T, bool, error) {
-	block, tagReminder, exists, err := cache.TraceTagForReading[blob.Block[blob.Object[T]]](
+	block, tagReminder, exists, err := cache.TraceTagForReading[blob.Block](
 		c,
 		origin,
 		uint64(objectID),
@@ -45,7 +45,7 @@ func SetObject[T comparable](
 	objectID blocks.ObjectID,
 	object T,
 ) error {
-	block, tagReminder, _, err := cache.TraceTagForUpdating[blob.Block[blob.Object[T]]](
+	block, tagReminder, _, err := cache.TraceTagForUpdating[blob.Block](
 		c,
 		origin,
 		uint64(objectID),
@@ -59,8 +59,8 @@ func SetObject[T comparable](
 		// TODO (wojciech): Check if split makes sense, if it is the last level, then it doesn't
 
 		var err error
-		block.Block, tagReminder, err = block.Split(func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*blob.Block[blob.Object[T]], uint64, error)) error {
-			return splitBlock(block.Block.Block, objectsPerBlock, newBlockForTagReminderFunc)
+		block.Block, tagReminder, err = block.Split(func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*blob.Block, uint64, error)) error {
+			return splitBlock[T](block.Block.Block, objectsPerBlock, newBlockForTagReminderFunc)
 		})
 		if err != nil {
 			return err
@@ -85,7 +85,7 @@ func SetObject[T comparable](
 }
 
 func findObject[T comparable](
-	block *blob.Block[blob.Object[T]],
+	block *blob.Block,
 	objectsPerBlock int,
 	tagReminder uint64,
 ) *blob.Object[T] {
@@ -118,9 +118,9 @@ func findObject[T comparable](
 }
 
 func splitBlock[T comparable](
-	block *blob.Block[blob.Object[T]],
+	block *blob.Block,
 	objectsPerBlock int,
-	newBlockForTagReminderFunc func(oldTagReminder uint64) (*blob.Block[blob.Object[T]], uint64, error),
+	newBlockForTagReminderFunc func(oldTagReminder uint64) (*blob.Block, uint64, error),
 ) error {
 	objects := photon.SliceFromBytes[blob.Object[T]](block.Data[:], objectsPerBlock)
 	for i := 0; i < objectsPerBlock; i++ {

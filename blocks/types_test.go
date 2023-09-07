@@ -18,7 +18,7 @@ func TestBlockSizes(t *testing.T) {
 	assertDiskSize[singularity.Block](t)
 	assertDiskSize[pointer.Block](t)
 	assertDiskSize[objectlist.Block](t)
-	assertDiskSize[blob.Block[[blocks.BlockSize]byte]](t)
+	assertDiskSize[blob.Block](t)
 }
 
 func assertDiskSize[T blocks.Block](t *testing.T) {

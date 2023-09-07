@@ -22,8 +22,8 @@ type Object[T comparable] struct {
 }
 
 // Block contains any data.
-type Block[T comparable] struct {
-	Data [blocks.BlockSize]byte
+type Block struct {
+	Data [blocks.BlockSize - 8]byte
 
 	NUsedSlots uint64
 }

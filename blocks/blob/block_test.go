@@ -13,7 +13,7 @@ import (
 func TestMappingBlobToSlice(t *testing.T) {
 	assertT := assert.New(t)
 
-	block := &Block[Object[item]]{}
+	block := &Block{}
 	checksum := blocks.BlockChecksum(block)
 	items := photon.SliceFromBytes[Object[item]](block.Data[:], 4)
 
