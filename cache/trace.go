@@ -77,8 +77,9 @@ func TraceTagForUpdating[T blocks.Block](
 			*currentOrigin.BlockType = blocks.LeafBlockType
 
 			return Trace[T]{
-				PointerBlocks: pointerTrace,
-				Origin:        currentOrigin,
+				c:             c,
+				pointerBlocks: pointerTrace,
+				origin:        currentOrigin,
 				Block:         leafBlock,
 			}, tagReminder, true, nil
 		case blocks.LeafBlockType:
@@ -93,7 +94,8 @@ func TraceTagForUpdating[T blocks.Block](
 			}
 
 			tracedBlock := Trace[T]{
-				Origin: currentOrigin,
+				c:      c,
+				origin: currentOrigin,
 				Block:  leafBlock,
 			}
 
@@ -112,7 +114,7 @@ func TraceTagForUpdating[T blocks.Block](
 				currentOrigin.PointerBlock.DecrementReferences()
 			}
 
-			tracedBlock.PointerBlocks = pointerTrace
+			tracedBlock.pointerBlocks = pointerTrace
 			tracedBlock.splitFunc = func(splitFunc func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*T, uint64, error)) error) (Block[T], uint64, error) {
 				leafBlock.IncrementReferences() // to prevent unloading until chunks are copied
 
@@ -209,9 +211,7 @@ func TraceTagForUpdating[T blocks.Block](
 						}
 					}
 
-					if err := DirtyBlock(c, newBlock); err != nil {
-						return nil, 0, err
-					}
+					c.dirtyBlock(newBlock.meta)
 
 					return newBlock.Block, oldTagReminder / pointer.PointersPerBlock, nil
 				}
@@ -220,7 +220,7 @@ func TraceTagForUpdating[T blocks.Block](
 				}
 
 				leafBlock.DecrementReferences()
-				InvalidateBlock(c, leafBlock)
+				c.invalidateBlock(leafBlock.meta)
 
 				returnedBlock.DecrementReferences()
 
@@ -277,9 +277,7 @@ func (c *Cache) newPointerBlockPostCommitFunc(
 
 		if origin.PointerBlock.IsValid() {
 			origin.PointerBlock.DecrementReferences()
-			if err := DirtyBlock(c, origin.PointerBlock); err != nil {
-				return err
-			}
+			c.dirtyBlock(origin.PointerBlock.meta)
 		}
 
 		return nil
@@ -302,9 +300,7 @@ func newLeafBlockPostCommitFunc[T blocks.Block](
 
 		if origin.PointerBlock.IsValid() {
 			origin.PointerBlock.DecrementReferences()
-			if err := DirtyBlock(c, origin.PointerBlock); err != nil {
-				return err
-			}
+			c.dirtyBlock(origin.PointerBlock.meta)
 		}
 
 		return nil
@@ -313,14 +309,27 @@ func newLeafBlockPostCommitFunc[T blocks.Block](
 
 // Trace stores the trace of incremented pointer blocks leading to the final leaf node
 type Trace[T blocks.Block] struct {
-	PointerBlocks []Block[pointer.Block]
-	Origin        BlockOrigin
-	Block         Block[T]
+	Block Block[T]
 
-	splitFunc func(splitFunc func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*T, uint64, error)) error) (Block[T], uint64, error)
+	c             *Cache
+	pointerBlocks []Block[pointer.Block]
+	origin        BlockOrigin
+	splitFunc     func(splitFunc func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*T, uint64, error)) error) (Block[T], uint64, error)
 }
 
 // Split replaces a leaf block with a new pointer block and triggers redistribution of existing items between new set of leaf blocks.
 func (t Trace[T]) Split(splitFunc func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*T, uint64, error)) error) (Block[T], uint64, error) {
 	return t.splitFunc(splitFunc)
+}
+
+// Commit marks block as dirty, meaning that changes will be saved to the device later.
+func (t Trace[T]) Commit() {
+	t.c.dirtyBlock(t.Block.meta)
+}
+
+// Release is used to decrement references to pointer blocks if leaf block has not been modified.
+func (t Trace[T]) Release() {
+	for _, pointerBlock := range t.pointerBlocks {
+		pointerBlock.DecrementReferences()
+	}
 }
