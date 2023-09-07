@@ -54,6 +54,14 @@ func BenchmarkKeystore(b *testing.B) {
 
 			_ = c.Commit()
 		}()
+
+		func() {
+			for i := 0; i < len(keys); i++ {
+				_, _, _ = store.GetObjectID(keys[i][:])
+			}
+
+			_ = c.Commit()
+		}()
 		b.StopTimer()
 	}
 }

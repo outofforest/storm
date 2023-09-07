@@ -36,22 +36,21 @@ func (s *Store) GetObjectID(key []byte) (blocks.ObjectID, bool, error) {
 	}
 
 	sBlock := s.c.SingularityBlock()
-	dataBlock, tagReminder, exists, err := cache.TraceTag[objectlist.Block](
+	block, tagReminder, exists, err := cache.TraceTagForReading[objectlist.Block](
 		s.c,
 		cache.BlockOrigin{
 			Pointer:   &sBlock.RootData,
 			BlockType: &sBlock.RootDataBlockType,
 		},
-		false,
 		xxhash.Sum64(key),
 	)
 	if !exists || err != nil {
 		return 0, false, err
 	}
 
-	index, chunkFound := findChunkPointerForKey(dataBlock.Block.Block, key, tagReminder)
-	if chunkFound && dataBlock.Block.Block.ChunkPointerStates[index] == objectlist.DefinedChunkState {
-		return dataBlock.Block.Block.ObjectLinks[index], true, nil
+	index, chunkFound := findChunkPointerForKey(block, key, tagReminder)
+	if chunkFound && block.ChunkPointerStates[index] == objectlist.DefinedChunkState {
+		return block.ObjectLinks[index], true, nil
 	}
 
 	return 0, false, nil
@@ -67,13 +66,12 @@ func (s *Store) EnsureObjectID(key []byte) (blocks.ObjectID, error) {
 	}
 
 	sBlock := s.c.SingularityBlock()
-	dataBlock, tagReminder, _, err := cache.TraceTag[objectlist.Block](
+	dataBlock, tagReminder, _, err := cache.TraceTagForUpdating[objectlist.Block](
 		s.c,
 		cache.BlockOrigin{
 			Pointer:   &sBlock.RootData,
 			BlockType: &sBlock.RootDataBlockType,
 		},
-		true,
 		xxhash.Sum64(key),
 	)
 	if err != nil {
