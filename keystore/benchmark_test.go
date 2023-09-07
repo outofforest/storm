@@ -43,13 +43,16 @@ func BenchmarkKeystore(b *testing.B) {
 		c, err := cache.New(s, 500*1024*1024)
 		requireT.NoError(err)
 
-		store, err := New(c)
-		requireT.NoError(err)
+		sBlock := c.SingularityBlock()
+		origin := cache.BlockOrigin{
+			Pointer:   &sBlock.RootData,
+			BlockType: &sBlock.RootDataBlockType,
+		}
 
 		b.StartTimer()
 		func() {
 			for i := 0; i < len(keys); i++ {
-				_, _ = store.EnsureObjectID(keys[i][:])
+				_, _ = EnsureObjectID(c, origin, keys[i][:])
 			}
 
 			_ = c.Commit()
@@ -57,7 +60,7 @@ func BenchmarkKeystore(b *testing.B) {
 
 		func() {
 			for i := 0; i < len(keys); i++ {
-				_, _, _ = store.GetObjectID(keys[i][:])
+				_, _, _ = GetObjectID(c, origin, keys[i][:])
 			}
 
 			_ = c.Commit()
