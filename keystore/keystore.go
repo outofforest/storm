@@ -14,20 +14,12 @@ import (
 
 // TODO (wojciech): Implement deleting keys
 
-// Store represents the key store keeping the relation between keys and object IDs.
-type Store struct {
-	c *cache.Cache
-}
-
-// New returns new key store.
-func New(c *cache.Cache) (*Store, error) {
-	return &Store{
-		c: c,
-	}, nil
-}
-
 // GetObjectID returns existing object ID for key.
-func (s *Store) GetObjectID(key []byte) (blocks.ObjectID, bool, error) {
+func GetObjectID(
+	c *cache.Cache,
+	origin cache.BlockOrigin,
+	key []byte,
+) (blocks.ObjectID, bool, error) {
 	if len(key) == 0 {
 		return 0, false, errors.Errorf("key cannot be empty")
 	}
@@ -35,13 +27,9 @@ func (s *Store) GetObjectID(key []byte) (blocks.ObjectID, bool, error) {
 		return 0, false, errors.Errorf("maximum key component length exceeded, maximum: %d, actual: %d", objectlist.MaxKeyComponentLength, len(key))
 	}
 
-	sBlock := s.c.SingularityBlock()
 	block, tagReminder, exists, err := cache.TraceTagForReading[objectlist.Block](
-		s.c,
-		cache.BlockOrigin{
-			Pointer:   &sBlock.RootData,
-			BlockType: &sBlock.RootDataBlockType,
-		},
+		c,
+		origin,
 		xxhash.Sum64(key),
 	)
 	if !exists || err != nil {
@@ -57,7 +45,11 @@ func (s *Store) GetObjectID(key []byte) (blocks.ObjectID, bool, error) {
 }
 
 // EnsureObjectID returns object ID for key. If the object ID does not exist it is created.
-func (s *Store) EnsureObjectID(key []byte) (blocks.ObjectID, error) {
+func EnsureObjectID(
+	c *cache.Cache,
+	origin cache.BlockOrigin,
+	key []byte,
+) (blocks.ObjectID, error) {
 	if len(key) == 0 {
 		return 0, errors.Errorf("key cannot be empty")
 	}
@@ -65,13 +57,9 @@ func (s *Store) EnsureObjectID(key []byte) (blocks.ObjectID, error) {
 		return 0, errors.Errorf("maximum key component length exceeded, maximum: %d, actual: %d", objectlist.MaxKeyComponentLength, len(key))
 	}
 
-	sBlock := s.c.SingularityBlock()
 	block, tagReminder, _, err := cache.TraceTagForUpdating[objectlist.Block](
-		s.c,
-		cache.BlockOrigin{
-			Pointer:   &sBlock.RootData,
-			BlockType: &sBlock.RootDataBlockType,
-		},
+		c,
+		origin,
 		xxhash.Sum64(key),
 	)
 	if err != nil {
@@ -89,7 +77,7 @@ func (s *Store) EnsureObjectID(key []byte) (blocks.ObjectID, error) {
 
 		var err error
 		block.Block, tagReminder, err = block.Split(func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*objectlist.Block, uint64, error)) error {
-			return s.splitBlock(block.Block.Block, newBlockForTagReminderFunc)
+			return splitBlock(block.Block.Block, newBlockForTagReminderFunc)
 		})
 		if err != nil {
 			return 0, err
@@ -110,6 +98,7 @@ func (s *Store) EnsureObjectID(key []byte) (blocks.ObjectID, error) {
 		return 0, err
 	}
 
+	sBlock := c.SingularityBlock()
 	block.Block.Block.ObjectLinks[index] = sBlock.NextObjectID
 	sBlock.NextObjectID++
 
@@ -227,7 +216,7 @@ func initFreeChunkList(block *objectlist.Block) {
 	}
 }
 
-func (s *Store) splitBlock(
+func splitBlock(
 	block *objectlist.Block,
 	newBlockForTagReminderFunc func(oldTagReminder uint64) (*objectlist.Block, uint64, error),
 ) error {
