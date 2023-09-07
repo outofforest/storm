@@ -244,7 +244,7 @@ loop:
 // FetchBlock returns structure representing existing block of particular type.
 func FetchBlock[T blocks.Block](
 	cache *Cache,
-	pointer pointer.Pointer,
+	pointer *pointer.Pointer,
 ) (Block[T], bool, error) {
 	var v T
 	meta, err := cache.fetchBlock(pointer.Address, pointer.BirthRevision, int64(unsafe.Sizeof(v)), pointer.Checksum)

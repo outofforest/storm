@@ -20,14 +20,14 @@ func TraceTagForReading[T blocks.Block](
 		case blocks.FreeBlockType:
 			return nil, 0, false, nil
 		case blocks.LeafBlockType:
-			leafBlock, _, err := FetchBlock[T](c, *currentOrigin.Pointer)
+			leafBlock, _, err := FetchBlock[T](c, currentOrigin.Pointer)
 			if err != nil {
 				return nil, 0, false, err
 			}
 
 			return leafBlock.Block, tagReminder, true, nil
 		case blocks.PointerBlockType:
-			nextPointerBlock, _, err := FetchBlock[pointer.Block](c, *currentOrigin.Pointer)
+			nextPointerBlock, _, err := FetchBlock[pointer.Block](c, currentOrigin.Pointer)
 			if err != nil {
 				return nil, 0, false, err
 			}
@@ -87,7 +87,7 @@ func TraceTagForUpdating[T blocks.Block](
 				currentOrigin.PointerBlock.IncrementReferences()
 			}
 
-			leafBlock, addedToCache, err := FetchBlock[T](c, *currentOrigin.Pointer)
+			leafBlock, addedToCache, err := FetchBlock[T](c, currentOrigin.Pointer)
 			if err != nil {
 				return Trace[T]{}, 0, false, err
 			}
@@ -177,7 +177,7 @@ func TraceTagForUpdating[T blocks.Block](
 				currentOrigin.PointerBlock.IncrementReferences()
 			}
 
-			nextPointerBlock, addedToCache, err := FetchBlock[pointer.Block](c, *currentOrigin.Pointer)
+			nextPointerBlock, addedToCache, err := FetchBlock[pointer.Block](c, currentOrigin.Pointer)
 			if err != nil {
 				return Trace[T]{}, 0, false, err
 			}
