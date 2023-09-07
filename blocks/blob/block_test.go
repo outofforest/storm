@@ -14,24 +14,23 @@ func TestMappingBlobToSlice(t *testing.T) {
 
 	block := &Block[item]{}
 	checksum := blocks.BlockChecksum(block)
-	items := photon.NewSliceFromBytes[Object[item]](block.Data[:])
-	assertT.Len(items.V, 1365)
+	items := photon.SliceFromBytes[Object[item]](block.Data[:], 4)
 
-	items.V[0].ObjectIDTagReminder = 1
-	items.V[0].Object.Field1 = 2
-	items.V[0].Object.Field2 = 0x03
+	items[0].ObjectIDTagReminder = 1
+	items[0].Object.Field1 = 2
+	items[0].Object.Field2 = 0x03
 
-	items.V[1].ObjectIDTagReminder = 4
-	items.V[1].Object.Field1 = 5
-	items.V[1].Object.Field2 = 0x06
+	items[1].ObjectIDTagReminder = 4
+	items[1].Object.Field1 = 5
+	items[1].Object.Field2 = 0x06
 
-	items.V[2].ObjectIDTagReminder = 7
-	items.V[2].Object.Field1 = 8
-	items.V[2].Object.Field2 = 0x09
+	items[2].ObjectIDTagReminder = 7
+	items[2].Object.Field1 = 8
+	items[2].Object.Field2 = 0x09
 
-	items.V[3].ObjectIDTagReminder = 10
-	items.V[3].Object.Field1 = 11
-	items.V[3].Object.Field2 = 0x0c
+	items[3].ObjectIDTagReminder = 10
+	items[3].Object.Field1 = 11
+	items[3].Object.Field2 = 0x0c
 
 	assertT.Equal([]byte{
 		0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
