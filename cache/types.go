@@ -2,7 +2,6 @@ package cache
 
 import (
 	"github.com/outofforest/storm/blocks"
-	"github.com/outofforest/storm/blocks/pointer"
 )
 
 // blockState is the enum representing the state of the block.
@@ -26,9 +25,10 @@ type metadata struct {
 
 // BlockOrigin tracks information collected during traversing the tree up to the leaf block.
 type BlockOrigin struct {
-	PointerBlock Block[pointer.Block]
-	Pointer      *blocks.Pointer
-	BlockType    *blocks.BlockType
+	Pointer   *blocks.Pointer
+	BlockType *blocks.BlockType
+
+	parentBlockMeta *metadata
 }
 
 // Block represents block stored in cache.
@@ -50,19 +50,4 @@ func (b Block[T]) BirthRevision() uint64 {
 // WithPostCommitFunc sets post commit function executed after storing block to the device.
 func (b Block[T]) WithPostCommitFunc(postCommitFunc func() error) {
 	b.meta.PostCommitFunc = postCommitFunc
-}
-
-// IncrementReferences increments the number of references to this block.
-func (b Block[T]) IncrementReferences() {
-	b.meta.NReferences++
-}
-
-// DecrementReferences decrements the number of references to this block.
-func (b Block[T]) DecrementReferences() {
-	b.meta.NReferences--
-}
-
-// IsValid returns true if instance of the object is valid, meaning that it contains valid data and is not just a default instance.
-func (b Block[T]) IsValid() bool {
-	return b.meta != nil
 }

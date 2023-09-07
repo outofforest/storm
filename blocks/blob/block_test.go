@@ -17,19 +17,19 @@ func TestMappingBlobToSlice(t *testing.T) {
 	items := photon.NewSliceFromBytes[Object[item]](block.Data[:])
 	assertT.Len(items.V, 1365)
 
-	items.V[0].ObjectID = 1
+	items.V[0].ObjectIDTagReminder = 1
 	items.V[0].Object.Field1 = 2
 	items.V[0].Object.Field2 = 0x03
 
-	items.V[1].ObjectID = 4
+	items.V[1].ObjectIDTagReminder = 4
 	items.V[1].Object.Field1 = 5
 	items.V[1].Object.Field2 = 0x06
 
-	items.V[2].ObjectID = 7
+	items.V[2].ObjectIDTagReminder = 7
 	items.V[2].Object.Field1 = 8
 	items.V[2].Object.Field2 = 0x09
 
-	items.V[3].ObjectID = 10
+	items.V[3].ObjectIDTagReminder = 10
 	items.V[3].Object.Field1 = 11
 	items.V[3].Object.Field2 = 0x0c
 

@@ -17,16 +17,17 @@ const (
 	InvalidSlotState
 )
 
-// Slot contains mapping between ObjectID and address where data for that object exist.
+// Slot contains mapping between ObjectIDTagReminder and address where data for that object exist.
 type Slot struct {
-	ObjectID blocks.ObjectID
-	Pointer  blocks.Pointer
+	ObjectIDTagReminder uint64
+	Pointer             blocks.Pointer
 }
 
 // Block contains links to objects.
 type Block struct {
-	Slots             [SlotsPerBlock]Slot
-	PointedBlockTypes [SlotsPerBlock]blocks.BlockType
+	Slots      [SlotsPerBlock]Slot
+	SlotStates [SlotsPerBlock]SlotState
+	BlockTypes [SlotsPerBlock]blocks.BlockType
 
 	NUsedSlots uint16
 }
