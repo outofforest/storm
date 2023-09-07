@@ -64,7 +64,7 @@ func TraceTagForUpdating[T blocks.Block](
 			if err != nil {
 				return Trace[T]{}, 0, false, err
 			}
-			leafBlock.WithPostCommitFunc(NewLeafBlockPostCommitFunc(
+			leafBlock.WithPostCommitFunc(newLeafBlockPostCommitFunc(
 				c,
 				currentOrigin,
 				leafBlock,
@@ -101,7 +101,7 @@ func TraceTagForUpdating[T blocks.Block](
 				if currentOrigin.PointerBlock.IsValid() {
 					pointerTrace = append(pointerTrace, currentOrigin.PointerBlock)
 				}
-				leafBlock.WithPostCommitFunc(NewLeafBlockPostCommitFunc(
+				leafBlock.WithPostCommitFunc(newLeafBlockPostCommitFunc(
 					c,
 					currentOrigin,
 					leafBlock,
@@ -113,7 +113,7 @@ func TraceTagForUpdating[T blocks.Block](
 			}
 
 			tracedBlock.PointerBlocks = pointerTrace
-			tracedBlock.splitFunc = func(splitFunc func(newPointerBlock Block[pointer.Block]) error) (Block[T], uint64, error) {
+			tracedBlock.splitFunc = func(splitFunc func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*T, uint64, error)) error) (Block[T], uint64, error) {
 				leafBlock.IncrementReferences() // to prevent unloading until chunks are copied
 
 				newPointerBlock, err := NewBlock[pointer.Block](c)
@@ -146,7 +146,7 @@ func TraceTagForUpdating[T blocks.Block](
 				}
 				newPointerBlock.Block.PointedBlockTypes[returnedPointerIndex] = blocks.LeafBlockType
 
-				returnedBlock.WithPostCommitFunc(NewLeafBlockPostCommitFunc(
+				returnedBlock.WithPostCommitFunc(newLeafBlockPostCommitFunc(
 					c,
 					BlockOrigin{
 						PointerBlock: newPointerBlock,
@@ -158,7 +158,64 @@ func TraceTagForUpdating[T blocks.Block](
 
 				returnedBlock.IncrementReferences() // to prevent unloading when new blocks are created as a result of split
 
-				if err := splitFunc(newPointerBlock); err != nil {
+				newBlockForTagReminderFunc := func(oldTagReminder uint64) (*T, uint64, error) {
+					var newBlock Block[T]
+					pointerIndex := oldTagReminder % pointer.PointersPerBlock
+					if newPointerBlock.Block.PointedBlockTypes[pointerIndex] == blocks.FreeBlockType {
+						newPointerBlock.IncrementReferences()
+						var err error
+						newBlock, err = NewBlock[T](c)
+						if err != nil {
+							return nil, 0, err
+						}
+
+						newBlock.WithPostCommitFunc(newLeafBlockPostCommitFunc(
+							c,
+							BlockOrigin{
+								PointerBlock: newPointerBlock,
+								Pointer:      &newPointerBlock.Block.Pointers[pointerIndex],
+								BlockType:    &newPointerBlock.Block.PointedBlockTypes[pointerIndex],
+							},
+							newBlock,
+						))
+
+						newPointerBlock.Block.Pointers[pointerIndex] = pointer.Pointer{
+							Address:       newBlock.Address(),
+							BirthRevision: newBlock.BirthRevision(),
+						}
+						newPointerBlock.Block.PointedBlockTypes[pointerIndex] = blocks.LeafBlockType
+					} else {
+						newPointerBlock.IncrementReferences()
+
+						var addedToCache bool
+						var err error
+						newBlock, addedToCache, err = FetchBlock[T](c, &newPointerBlock.Block.Pointers[pointerIndex])
+						if err != nil {
+							return nil, 0, err
+						}
+
+						if addedToCache {
+							newBlock.WithPostCommitFunc(newLeafBlockPostCommitFunc(
+								c,
+								BlockOrigin{
+									PointerBlock: newPointerBlock,
+									Pointer:      &newPointerBlock.Block.Pointers[pointerIndex],
+									BlockType:    &newPointerBlock.Block.PointedBlockTypes[pointerIndex],
+								},
+								newBlock,
+							))
+						} else {
+							newPointerBlock.DecrementReferences()
+						}
+					}
+
+					if err := DirtyBlock(c, newBlock); err != nil {
+						return nil, 0, err
+					}
+
+					return newBlock.Block, oldTagReminder / pointer.PointersPerBlock, nil
+				}
+				if err := splitFunc(newBlockForTagReminderFunc); err != nil {
 					return Block[T]{}, 0, err
 				}
 
@@ -229,9 +286,8 @@ func (c *Cache) newPointerBlockPostCommitFunc(
 	}
 }
 
-// NewLeafBlockPostCommitFunc returns new function to be used as post commit function for leaf nodes.
 // TODO (wojciech): This function must receive a function computing the merkle proof hash of particular block type.
-func NewLeafBlockPostCommitFunc[T blocks.Block](
+func newLeafBlockPostCommitFunc[T blocks.Block](
 	c *Cache,
 	origin BlockOrigin,
 	leafBlock Block[T],
@@ -261,10 +317,10 @@ type Trace[T blocks.Block] struct {
 	Origin        BlockOrigin
 	Block         Block[T]
 
-	splitFunc func(splitFunc func(newPointerBlock Block[pointer.Block]) error) (Block[T], uint64, error)
+	splitFunc func(splitFunc func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*T, uint64, error)) error) (Block[T], uint64, error)
 }
 
 // Split replaces a leaf block with a new pointer block and triggers redistribution of existing items between new set of leaf blocks.
-func (t Trace[T]) Split(splitFunc func(newPointerBlock Block[pointer.Block]) error) (Block[T], uint64, error) {
+func (t Trace[T]) Split(splitFunc func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*T, uint64, error)) error) (Block[T], uint64, error) {
 	return t.splitFunc(splitFunc)
 }
