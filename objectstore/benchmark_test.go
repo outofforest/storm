@@ -1,12 +1,12 @@
-package keystore
+package objectstore
 
 import (
-	"crypto/rand"
 	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/outofforest/storm/blocks"
 	"github.com/outofforest/storm/cache"
 	"github.com/outofforest/storm/persistence"
 	"github.com/outofforest/storm/pkg/filedev"
@@ -16,19 +16,15 @@ import (
 // go tool pprof -http="localhost:8000" pprofbin ./profile.out
 
 func BenchmarkKeystore(b *testing.B) {
-	const size = 30000
+	const (
+		size            = 30000
+		objectsPerBlock = 100
+	)
 
 	b.StopTimer()
 	b.ResetTimer()
 
 	requireT := require.New(b)
-
-	keys := make([][48]byte, size)
-
-	for i := 0; i < len(keys); i++ {
-		_, err := rand.Read(keys[i][:])
-		requireT.NoError(err)
-	}
 
 	f, err := os.OpenFile("/home/wojciech/testdev", os.O_RDWR, 0o600)
 	requireT.NoError(err)
@@ -47,22 +43,22 @@ func BenchmarkKeystore(b *testing.B) {
 
 		sBlock := c.SingularityBlock()
 		origin := cache.BlockOrigin{
-			Pointer:   &sBlock.RootData,
-			BlockType: &sBlock.RootDataBlockType,
+			Pointer:   &sBlock.RootObjects,
+			BlockType: &sBlock.RootObjectsBlockType,
 		}
 
 		b.StartTimer()
 		func() {
-			for i := 0; i < len(keys); i++ {
-				_, _ = EnsureObjectID(c, origin, keys[i][:])
+			for i := 0; i < size; i++ {
+				_ = SetObject[item](c, origin, objectsPerBlock, blocks.ObjectID(i), item{Field1: 1, Field2: 2})
 			}
 
 			_ = c.Commit()
 		}()
 
 		func() {
-			for i := 0; i < len(keys); i++ {
-				_, _, _ = GetObjectID(c, origin, keys[i][:])
+			for i := 0; i < size; i++ {
+				_, _, _ = GetObject[item](c, origin, objectsPerBlock, blocks.ObjectID(i))
 			}
 
 			_ = c.Commit()
