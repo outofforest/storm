@@ -67,7 +67,7 @@ func TestFetchBlockByAddress(t *testing.T) {
 	_, err = dev.Write(newBlock.B)
 	requireT.NoError(err)
 
-	block, _, err := FetchBlock[pointer.Block](cache, &blocks.Pointer{
+	block, err := FetchBlock[pointer.Block](cache, &blocks.Pointer{
 		Checksum: blocks.BlockChecksum(newBlock.V),
 		Address:  1,
 	})
@@ -84,7 +84,7 @@ func TestFetchBlockByAddress(t *testing.T) {
 	_, err = dev.Write(newBlock.B)
 	requireT.NoError(err)
 
-	block, _, err = FetchBlock[pointer.Block](cache, &blocks.Pointer{
+	block, err = FetchBlock[pointer.Block](cache, &blocks.Pointer{
 		Checksum: blocks.BlockChecksum(newBlock.V),
 		Address:  1,
 	})
@@ -109,7 +109,7 @@ func TestNewBlock(t *testing.T) {
 
 	// Fetching block before it is created returns an error
 
-	_, _, err = FetchBlock[pointer.Block](cache, &blocks.Pointer{
+	_, err = FetchBlock[pointer.Block](cache, &blocks.Pointer{
 		Address: 2,
 	})
 	requireT.Error(err)
@@ -127,7 +127,7 @@ func TestNewBlock(t *testing.T) {
 
 	// Fetching block from cache should return new block
 
-	block, _, err := FetchBlock[pointer.Block](cache, &blocks.Pointer{
+	block, err := FetchBlock[pointer.Block](cache, &blocks.Pointer{
 		Checksum:      blocks.BlockChecksum(newBlock.Block),
 		Address:       newBlock.Address(),
 		BirthRevision: 1,
@@ -175,7 +175,7 @@ func TestNewBlock(t *testing.T) {
 	requireT.Equal(blocks.BlockAddress(1), devSBlock.V.LastAllocatedBlock)
 	requireT.Equal(blocks.BlockAddress(22), devNewBlock.V.Pointers[pointerIndex].Address)
 
-	block, _, err = FetchBlock[pointer.Block](cache, &blocks.Pointer{
+	block, err = FetchBlock[pointer.Block](cache, &blocks.Pointer{
 		Checksum:      blocks.BlockChecksum(devNewBlock.V),
 		Address:       1,
 		BirthRevision: 1,
@@ -189,7 +189,7 @@ func TestNewBlock(t *testing.T) {
 	cache2, err := New(store, cacheSize)
 	requireT.NoError(err)
 
-	block, _, err = FetchBlock[pointer.Block](cache2, &blocks.Pointer{
+	block, err = FetchBlock[pointer.Block](cache2, &blocks.Pointer{
 		Checksum:      blocks.BlockChecksum(devNewBlock.V),
 		Address:       1,
 		BirthRevision: 1,
@@ -220,7 +220,7 @@ func TestChecksumIsVerifiedWhenFetching(t *testing.T) {
 
 	// Block is in cache so fetching with invalid checksum should work
 
-	_, _, err = FetchBlock[pointer.Block](cache, &blocks.Pointer{
+	_, err = FetchBlock[pointer.Block](cache, &blocks.Pointer{
 		Address:       newBlock.Address(),
 		BirthRevision: 1,
 	})
@@ -233,7 +233,7 @@ func TestChecksumIsVerifiedWhenFetching(t *testing.T) {
 	cache2, err := New(store, cacheSize)
 	requireT.NoError(err)
 
-	_, _, err = FetchBlock[pointer.Block](cache2, &blocks.Pointer{
+	_, err = FetchBlock[pointer.Block](cache2, &blocks.Pointer{
 		Address:       newBlock.Address(),
 		BirthRevision: 1,
 	})
@@ -241,7 +241,7 @@ func TestChecksumIsVerifiedWhenFetching(t *testing.T) {
 
 	// It should succeed once correct checksum is provided
 
-	_, _, err = FetchBlock[pointer.Block](cache2, &blocks.Pointer{
+	_, err = FetchBlock[pointer.Block](cache2, &blocks.Pointer{
 		Checksum:      blocks.BlockChecksum(newBlock.Block),
 		Address:       newBlock.Address(),
 		BirthRevision: 1,
@@ -250,7 +250,7 @@ func TestChecksumIsVerifiedWhenFetching(t *testing.T) {
 
 	// Again, once block is in cache checksum doesn't matter
 
-	_, _, err = FetchBlock[pointer.Block](cache2, &blocks.Pointer{
+	_, err = FetchBlock[pointer.Block](cache2, &blocks.Pointer{
 		Address:       newBlock.Address(),
 		BirthRevision: 1,
 	})

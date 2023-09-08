@@ -18,6 +18,7 @@ type metadata struct {
 	Data           []byte
 	Address        blocks.BlockAddress
 	BirthRevision  uint64
+	NCommits       uint64
 	NReferences    uint64
 	State          blockState
 	PostCommitFunc func() error
@@ -45,9 +46,4 @@ func (b Block[T]) Address() blocks.BlockAddress {
 // BirthRevision returns revision when block was created.
 func (b Block[T]) BirthRevision() uint64 {
 	return b.meta.BirthRevision
-}
-
-// WithPostCommitFunc sets post commit function executed after storing block to the device.
-func (b Block[T]) WithPostCommitFunc(postCommitFunc func() error) {
-	b.meta.PostCommitFunc = postCommitFunc
 }

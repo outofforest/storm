@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/outofforest/storm/blocks"
-	"github.com/outofforest/storm/blocks/objectlist"
 	"github.com/outofforest/storm/cache"
 	"github.com/outofforest/storm/persistence"
 	"github.com/outofforest/storm/pkg/memdev"
@@ -30,10 +29,10 @@ func TestSetGet(t *testing.T) {
 	c, err := cache.New(s, cacheSize)
 	requireT.NoError(err)
 
-	sBlock := c.SingularityBlock()
+	var blockType blocks.BlockType
 	origin := cache.BlockOrigin{
-		Pointer:   &sBlock.RootData,
-		BlockType: &sBlock.RootDataBlockType,
+		Pointer:   &blocks.Pointer{},
+		BlockType: &blockType,
 	}
 
 	// Key intentionally takes 2.5 chunks.
@@ -63,12 +62,6 @@ func TestSetGet(t *testing.T) {
 	c, err = cache.New(s, cacheSize)
 	requireT.NoError(err)
 
-	sBlock = c.SingularityBlock()
-	origin = cache.BlockOrigin{
-		Pointer:   &sBlock.RootData,
-		BlockType: &sBlock.RootDataBlockType,
-	}
-
 	objectID2, exists, err = GetObjectID(c, origin, key)
 	requireT.NoError(err)
 	requireT.True(exists)
@@ -77,8 +70,8 @@ func TestSetGet(t *testing.T) {
 
 func TestStoringBatches(t *testing.T) {
 	const (
-		nBatches  = 30
-		batchSize = 50 * objectlist.ChunksPerBlock
+		nBatches  = 1500
+		batchSize = 5
 	)
 
 	requireT := require.New(t)
@@ -93,10 +86,10 @@ func TestStoringBatches(t *testing.T) {
 	c, err := cache.New(s, 15*blocks.BlockSize)
 	requireT.NoError(err)
 
-	sBlock := c.SingularityBlock()
+	var blockType blocks.BlockType
 	origin := cache.BlockOrigin{
-		Pointer:   &sBlock.RootData,
-		BlockType: &sBlock.RootDataBlockType,
+		Pointer:   &blocks.Pointer{},
+		BlockType: &blockType,
 	}
 
 	keys := make([][48]byte, nBatches*batchSize)
@@ -179,12 +172,6 @@ func TestStoringBatches(t *testing.T) {
 
 	c, err = cache.New(s, 15*blocks.BlockSize)
 	requireT.NoError(err)
-
-	sBlock = c.SingularityBlock()
-	origin = cache.BlockOrigin{
-		Pointer:   &sBlock.RootData,
-		BlockType: &sBlock.RootDataBlockType,
-	}
 
 	// Get object IDs
 
