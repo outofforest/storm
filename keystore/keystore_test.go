@@ -63,6 +63,12 @@ func TestSetGet(t *testing.T) {
 	c, err = cache.New(s, cacheSize)
 	requireT.NoError(err)
 
+	sBlock = c.SingularityBlock()
+	origin = cache.BlockOrigin{
+		Pointer:   &sBlock.RootData,
+		BlockType: &sBlock.RootDataBlockType,
+	}
+
 	objectID2, exists, err = GetObjectID(c, origin, key)
 	requireT.NoError(err)
 	requireT.True(exists)
@@ -173,6 +179,12 @@ func TestStoringBatches(t *testing.T) {
 
 	c, err = cache.New(s, 15*blocks.BlockSize)
 	requireT.NoError(err)
+
+	sBlock = c.SingularityBlock()
+	origin = cache.BlockOrigin{
+		Pointer:   &sBlock.RootData,
+		BlockType: &sBlock.RootDataBlockType,
+	}
 
 	// Get object IDs
 
