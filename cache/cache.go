@@ -123,14 +123,17 @@ func (c *Cache) commitBlock(meta *metadata) error {
 	// TODO (wojciech): Try to reset map in single step
 	delete(c.dirtyBlocks, meta)
 
-	if meta.PostCommitFunc == nil {
-		return nil
+	if meta.PostCommitFunc != nil {
+		postCommitFunc := meta.PostCommitFunc
+		meta.PostCommitFunc = nil
+
+		if err := postCommitFunc(); err != nil {
+			return err
+		}
 	}
 
-	postCommitFunc := meta.PostCommitFunc
-	meta.PostCommitFunc = nil
-
-	return postCommitFunc()
+	meta.NCommits = 0
+	return nil
 }
 
 func (c *Cache) fetchBlock(
@@ -231,6 +234,8 @@ loop:
 	}
 
 	if meta.State != usedBlockState {
+		meta.NCommits = 0
+		meta.NReferences = 0
 		meta.PostCommitFunc = nil
 	}
 
@@ -240,13 +245,16 @@ loop:
 	return meta, nil
 }
 
-func (c *Cache) dirtyBlock(meta *metadata) {
+func (c *Cache) dirtyBlock(meta *metadata, nCommits uint64) {
+	meta.NCommits += nCommits
 	c.dirtyBlocks[meta] = struct{}{}
 }
 
 func (c *Cache) invalidateBlock(meta *metadata) {
 	delete(c.dirtyBlocks, meta)
 	meta.State = invalidBlockState
+	meta.NCommits = 0
+	meta.NReferences = 0
 	meta.PostCommitFunc = nil
 }
 
@@ -254,17 +262,17 @@ func (c *Cache) invalidateBlock(meta *metadata) {
 func FetchBlock[T blocks.Block](
 	cache *Cache,
 	pointer *blocks.Pointer,
-) (Block[T], bool, error) {
+) (Block[T], error) {
 	var v T
 	meta, err := cache.fetchBlock(pointer.Address, pointer.BirthRevision, int64(unsafe.Sizeof(v)), pointer.Checksum)
 	if err != nil {
-		return Block[T]{}, false, err
+		return Block[T]{}, err
 	}
 
 	return Block[T]{
 		meta:  meta,
 		Block: photon.FromBytes[T](meta.Data),
-	}, meta.PostCommitFunc == nil, nil
+	}, nil
 }
 
 // NewBlock returns structure representing new block of particular type.

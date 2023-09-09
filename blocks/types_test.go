@@ -12,11 +12,13 @@ import (
 	"github.com/outofforest/storm/blocks/objectlist"
 	"github.com/outofforest/storm/blocks/pointer"
 	"github.com/outofforest/storm/blocks/singularity"
+	"github.com/outofforest/storm/blocks/spacelist"
 )
 
 func TestBlockSizes(t *testing.T) {
 	assertDiskSize[singularity.Block](t)
 	assertDiskSize[pointer.Block](t)
+	assertDiskSize[spacelist.Block](t)
 	assertDiskSize[objectlist.Block](t)
 	assertDiskSize[blob.Block](t)
 }

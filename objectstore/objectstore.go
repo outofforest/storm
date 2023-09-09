@@ -54,20 +54,23 @@ func SetObject[T comparable](
 		return err
 	}
 
-	objects := photon.SliceFromBytes[blob.Object[T]](block.Block.Block.Data[:], objectsPerBlock)
-	if block.Block.Block.NUsedSlots >= uint64(len(objects))*3/4 {
-		// TODO (wojciech): Check if split makes sense, if it is the last level, then it doesn't
+	objectSlot := findObject[T](block.Block.Block, objectsPerBlock, tagReminder)
+	if objectSlot == nil || objectSlot.State != blob.DefinedObjectState {
+		objects := photon.SliceFromBytes[blob.Object[T]](block.Block.Block.Data[:], objectsPerBlock)
+		if block.Block.Block.NUsedSlots >= uint64(len(objects))*3/4 {
+			// TODO (wojciech): Check if split makes sense, if it is the last level, then it doesn't
 
-		var err error
-		block.Block, tagReminder, err = block.Split(func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*blob.Block, uint64, error)) error {
-			return splitBlock[T](block.Block.Block, objectsPerBlock, newBlockForTagReminderFunc)
-		})
-		if err != nil {
-			return err
+			var err error
+			block, tagReminder, err = block.Split(func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*blob.Block, uint64, error)) error {
+				return splitBlock[T](block.Block.Block, objectsPerBlock, newBlockForTagReminderFunc)
+			})
+			if err != nil {
+				return err
+			}
+
+			objectSlot = findObject[T](block.Block.Block, objectsPerBlock, tagReminder)
 		}
 	}
-
-	objectSlot := findObject[T](block.Block.Block, objectsPerBlock, tagReminder)
 	if objectSlot == nil {
 		return errors.Errorf("cannot find slot for object ID %x", objectID)
 	}

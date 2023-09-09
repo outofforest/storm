@@ -28,6 +28,9 @@ type Block interface {
 // ObjectID is the ID of the object in storm.
 type ObjectID uint64
 
+// SpaceID is the ID of the space in storm.
+type SpaceID uint64
+
 // Pointer is a pointer to other block.
 type Pointer struct {
 	Checksum      Hash

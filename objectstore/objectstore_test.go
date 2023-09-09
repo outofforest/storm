@@ -46,10 +46,10 @@ func TestSetGet(t *testing.T) {
 	c, err := cache.New(s, cacheSize)
 	requireT.NoError(err)
 
-	sBlock := c.SingularityBlock()
+	var blockType blocks.BlockType
 	origin := cache.BlockOrigin{
-		Pointer:   &sBlock.RootObjects,
-		BlockType: &sBlock.RootObjectsBlockType,
+		Pointer:   &blocks.Pointer{},
+		BlockType: &blockType,
 	}
 
 	// Object does not exist
@@ -94,12 +94,6 @@ func TestSetGet(t *testing.T) {
 	c, err = cache.New(s, cacheSize)
 	requireT.NoError(err)
 
-	sBlock = c.SingularityBlock()
-	origin = cache.BlockOrigin{
-		Pointer:   &sBlock.RootObjects,
-		BlockType: &sBlock.RootObjectsBlockType,
-	}
-
 	object1, exists, err = GetObject[item](c, origin, 10, 1)
 	requireT.NoError(err)
 	requireT.True(exists)
@@ -127,12 +121,6 @@ func TestSetGet(t *testing.T) {
 	c, err = cache.New(s, cacheSize)
 	requireT.NoError(err)
 
-	sBlock = c.SingularityBlock()
-	origin = cache.BlockOrigin{
-		Pointer:   &sBlock.RootObjects,
-		BlockType: &sBlock.RootObjectsBlockType,
-	}
-
 	object1, exists, err = GetObject[item](c, origin, 10, 1)
 	requireT.NoError(err)
 	requireT.True(exists)
@@ -146,9 +134,9 @@ func TestSetGet(t *testing.T) {
 
 func TestStoringBatches(t *testing.T) {
 	const (
-		nBatches        = 30
+		nBatches        = 1200
+		batchSize       = 5
 		objectsPerBlock = 10
-		batchSize       = 20 * objectsPerBlock
 	)
 
 	requireT := require.New(t)
@@ -163,10 +151,10 @@ func TestStoringBatches(t *testing.T) {
 	c, err := cache.New(s, 15*blocks.BlockSize)
 	requireT.NoError(err)
 
-	sBlock := c.SingularityBlock()
+	var blockType blocks.BlockType
 	origin := cache.BlockOrigin{
-		Pointer:   &sBlock.RootData,
-		BlockType: &sBlock.RootDataBlockType,
+		Pointer:   &blocks.Pointer{},
+		BlockType: &blockType,
 	}
 
 	for k, i := 0, 0; i < nBatches; i++ {

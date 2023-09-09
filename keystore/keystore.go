@@ -76,7 +76,7 @@ func EnsureObjectID(
 		// TODO (wojciech): Check if split is possible - if all the keys have the same hash then it is not.
 
 		var err error
-		block.Block, tagReminder, err = block.Split(func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*objectlist.Block, uint64, error)) error {
+		block, tagReminder, err = block.Split(func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*objectlist.Block, uint64, error)) error {
 			return splitBlock(block.Block.Block, newBlockForTagReminderFunc)
 		})
 		if err != nil {

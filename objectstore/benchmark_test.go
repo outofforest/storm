@@ -15,7 +15,7 @@ import (
 // go test -bench=. -run=^$ -cpuprofile profile.out -benchtime=5x
 // go tool pprof -http="localhost:8000" pprofbin ./profile.out
 
-func BenchmarkKeystore(b *testing.B) {
+func BenchmarkObjectStore(b *testing.B) {
 	const (
 		size            = 30000
 		objectsPerBlock = 100
@@ -60,8 +60,6 @@ func BenchmarkKeystore(b *testing.B) {
 			for i := 0; i < size; i++ {
 				_, _, _ = GetObject[item](c, origin, objectsPerBlock, blocks.ObjectID(i))
 			}
-
-			_ = c.Commit()
 		}()
 		b.StopTimer()
 	}
