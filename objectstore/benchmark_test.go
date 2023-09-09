@@ -41,16 +41,16 @@ func BenchmarkObjectStore(b *testing.B) {
 		c, err := cache.New(s, 500*1024*1024)
 		requireT.NoError(err)
 
-		sBlock := c.SingularityBlock()
+		var blockType blocks.BlockType
 		origin := cache.BlockOrigin{
-			Pointer:   &sBlock.RootObjects,
-			BlockType: &sBlock.RootObjectsBlockType,
+			Pointer:   &blocks.Pointer{},
+			BlockType: &blockType,
 		}
 
 		b.StartTimer()
 		func() {
 			for i := 0; i < size; i++ {
-				_ = SetObject[item](c, origin, objectsPerBlock, blocks.ObjectID(i), item{Field1: 1, Field2: 2})
+				_ = SetObject[item](c, origin, nil, objectsPerBlock, blocks.ObjectID(i), item{Field1: 1, Field2: 2})
 			}
 
 			_ = c.Commit()

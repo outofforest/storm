@@ -15,22 +15,30 @@ func GetSpace(
 	c *cache.Cache,
 	origin cache.BlockOrigin,
 	spaceID blocks.SpaceID,
-) (*spacelist.Space, bool, error) {
+) (cache.BlockOrigin, cache.BlockOrigin, bool, error) {
 	block, tagReminder, exists, err := cache.TraceTagForReading[spacelist.Block](
 		c,
 		origin,
 		uint64(spaceID),
 	)
 	if !exists || err != nil {
-		return nil, false, err
+		return cache.BlockOrigin{}, cache.BlockOrigin{}, false, err
 	}
 
 	space := findSpace(block, tagReminder)
-	if space != nil && space.State == spacelist.DefinedSpaceState {
-		return space, true, nil
+	if space == nil || space.State != spacelist.DefinedSpaceState {
+		return cache.BlockOrigin{}, cache.BlockOrigin{}, false, nil
 	}
 
-	return nil, false, nil
+	// TODO (wojciech): Set space block as a parent for keystore and objectstore
+
+	return cache.BlockOrigin{
+			Pointer:   &space.KeyStorePointer,
+			BlockType: &space.KeyStoreBlockType,
+		}, cache.BlockOrigin{
+			Pointer:   &space.ObjectStorePointer,
+			BlockType: &space.ObjectStoreBlockType,
+		}, true, nil
 }
 
 // EnsureSpace returns space. If it does not exist it is created.
@@ -38,42 +46,51 @@ func EnsureSpace(
 	c *cache.Cache,
 	origin cache.BlockOrigin,
 	spaceID blocks.SpaceID,
-) (*spacelist.Space, cache.Trace[spacelist.Block], error) {
-	block, tagReminder, _, err := cache.TraceTagForUpdating[spacelist.Block](
+) (cache.BlockOrigin, cache.BlockOrigin, *cache.Trace, error) {
+	block, trace, splitFunc, tagReminder, err := cache.TraceTagForUpdating[spacelist.Block](
 		c,
 		origin,
+		nil,
 		uint64(spaceID),
+		2,
 	)
 	if err != nil {
-		return nil, cache.Trace[spacelist.Block]{}, err
+		return cache.BlockOrigin{}, cache.BlockOrigin{}, nil, err
 	}
 
-	space := findSpace(block.Block.Block, tagReminder)
-	if space == nil || (space.State != spacelist.DefinedSpaceState && block.Block.Block.NUsedSpaces >= spacelist.SplitTrigger) {
+	space := findSpace(block, tagReminder)
+	if space == nil || (space.State != spacelist.DefinedSpaceState && block.NUsedSpaces >= spacelist.SplitTrigger) {
 		// TODO (wojciech): Check if split makes sense, if it is the last level, then it doesn't
 
 		var err error
-		block, tagReminder, err = block.Split(func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*spacelist.Block, uint64, error)) error {
-			return splitBlock(block.Block.Block, newBlockForTagReminderFunc)
+		block, trace, tagReminder, err = splitFunc(func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*spacelist.Block, uint64, error)) error {
+			return splitBlock(block, newBlockForTagReminderFunc)
 		})
 		if err != nil {
-			return nil, cache.Trace[spacelist.Block]{}, err
+			return cache.BlockOrigin{}, cache.BlockOrigin{}, nil, err
 		}
-		space = findSpace(block.Block.Block, tagReminder)
+		space = findSpace(block, tagReminder)
 	}
 	if space == nil {
-		return nil, cache.Trace[spacelist.Block]{}, errors.Errorf("cannot find slot for space ID %x", spaceID)
+		return cache.BlockOrigin{}, cache.BlockOrigin{}, nil, errors.Errorf("cannot find slot for space ID %x", spaceID)
 	}
 
 	if space.State != spacelist.DefinedSpaceState {
-		block.Block.Block.NUsedSpaces++
+		block.NUsedSpaces++
+		space.State = spacelist.DefinedSpaceState
 		space.SpaceIDTagReminder = tagReminder
 	}
 
-	// TODO (wojciech): Later on, if final leaf block is not updated, the space block must be released
-	// TODO (wojciech): Final leaf block must have post commit function set to commit changes in the space block
+	// TODO (wojciech): Later on, if final leaf trace is not updated, the space trace must be released
+	// TODO (wojciech): Final leaf trace must have post commit function set to commit changes in the space trace
 
-	return space, block, nil
+	return cache.BlockOrigin{
+			Pointer:   &space.KeyStorePointer,
+			BlockType: &space.KeyStoreBlockType,
+		}, cache.BlockOrigin{
+			Pointer:   &space.ObjectStorePointer,
+			BlockType: &space.ObjectStoreBlockType,
+		}, trace, nil
 }
 
 func findSpace(

@@ -20,14 +20,14 @@ func TraceTagForReading[T blocks.Block](
 		case blocks.FreeBlockType:
 			return nil, 0, false, nil
 		case blocks.LeafBlockType:
-			leafBlock, err := FetchBlock[T](c, currentOrigin.Pointer)
+			leafBlock, _, err := fetchBlock[T](c, currentOrigin.Pointer)
 			if err != nil {
 				return nil, 0, false, err
 			}
 
-			return leafBlock.Block, tagReminder, true, nil
+			return leafBlock, tagReminder, true, nil
 		case blocks.PointerBlockType:
-			nextPointerBlock, err := FetchBlock[pointer.Block](c, currentOrigin.Pointer)
+			nextPointerBlock, _, err := fetchBlock[pointer.Block](c, currentOrigin.Pointer)
 			if err != nil {
 				return nil, 0, false, err
 			}
@@ -35,217 +35,241 @@ func TraceTagForReading[T blocks.Block](
 			pointerIndex := tagReminder % pointer.PointersPerBlock
 			tagReminder /= pointer.PointersPerBlock
 
-			currentOrigin.Pointer = &nextPointerBlock.Block.Pointers[pointerIndex]
-			currentOrigin.BlockType = &nextPointerBlock.Block.PointedBlockTypes[pointerIndex]
+			currentOrigin.Pointer = &nextPointerBlock.Pointers[pointerIndex]
+			currentOrigin.BlockType = &nextPointerBlock.PointedBlockTypes[pointerIndex]
 		}
 	}
 }
+
+// SplitFunc is a function used to split block.
+type SplitFunc[T blocks.Block] func(splitFunc func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*T, uint64, error)) error) (*T, *Trace, uint64, error)
 
 // TraceTagForUpdating starts from origin and follows pointer blocks until the final leaf block is found.
 // This function, when tracing, collects all the information required to store updated version of the leaf block.
 func TraceTagForUpdating[T blocks.Block](
 	c *Cache,
 	origin BlockOrigin,
+	parentTrace *Trace,
 	tag uint64,
-) (Trace[T], uint64, bool, error) {
+	nReferences uint64,
+) (*T, *Trace, SplitFunc[T], uint64, error) {
 	currentOrigin := origin
-	pointerTrace := make([]*metadata, 0, 11) // TODO (wojciech): Find the right size
+	var parentBlockMeta *blockMetadata
+	if parentTrace != nil {
+		parentBlockMeta = parentTrace.meta
+	}
+	pointerTrace := make([]*blockMetadata, 0, 11) // TODO (wojciech): Find the right size
 	tagReminder := tag
 
 	for {
 		switch *currentOrigin.BlockType {
 		case blocks.FreeBlockType:
-			leafBlock, err := NewBlock[T](c)
+			leafBlock, leafMeta, err := newBlock[T](c)
 			if err != nil {
-				return Trace[T]{}, 0, false, err
+				return nil, nil, nil, 0, err
 			}
 
-			leafBlock.meta.PostCommitFunc = newLeafBlockPostCommitFunc(
+			leafMeta.PostCommitFunc = newLeafBlockPostCommitFunc(
 				c,
 				currentOrigin,
+				parentBlockMeta,
 				leafBlock,
+				leafMeta,
 			)
 
+			leafMeta.NReferences = nReferences
+
 			*currentOrigin.Pointer = blocks.Pointer{
-				Address:       leafBlock.Address(),
-				BirthRevision: leafBlock.BirthRevision(),
+				Address:       leafMeta.Address,
+				BirthRevision: leafMeta.BirthRevision,
 			}
 			*currentOrigin.BlockType = blocks.LeafBlockType
 
-			return Trace[T]{
+			return leafBlock, &Trace{
 				c:             c,
+				meta:          leafMeta,
 				pointerBlocks: pointerTrace,
-				origin:        currentOrigin,
-				Block:         leafBlock,
-			}, tagReminder, true, nil
+				parentTrace:   parentTrace,
+			}, nil, tagReminder, nil
 		case blocks.LeafBlockType:
-			leafBlock, err := FetchBlock[T](c, currentOrigin.Pointer)
+			leafBlock, leafMeta, err := fetchBlock[T](c, currentOrigin.Pointer)
 			if err != nil {
-				return Trace[T]{}, 0, false, err
+				return nil, nil, nil, 0, err
 			}
 
-			leafBlock.meta.PostCommitFunc = newLeafBlockPostCommitFunc(
+			leafMeta.PostCommitFunc = newLeafBlockPostCommitFunc(
 				c,
 				currentOrigin,
+				parentBlockMeta,
 				leafBlock,
+				leafMeta,
 			)
 
-			tracedBlock := Trace[T]{
+			leafMeta.NReferences += nReferences
+
+			tracedBlock := &Trace{
 				c:             c,
+				meta:          leafMeta,
 				pointerBlocks: pointerTrace,
-				origin:        currentOrigin,
-				Block:         leafBlock,
+				parentTrace:   parentTrace,
 			}
 
-			tracedBlock.splitFunc = func(splitFunc func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*T, uint64, error)) error) (Trace[T], uint64, error) {
-				leafBlock.meta.NReferences++ // to prevent unloading until chunks are copied
-
-				newPointerBlock, err := NewBlock[pointer.Block](c)
+			splitFunc := func(splitFunc func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*T, uint64, error)) error) (*T, *Trace, uint64, error) {
+				newPointerBlock, newPointerMeta, err := newBlock[pointer.Block](c)
 				if err != nil {
-					return Trace[T]{}, 0, err
+					return nil, nil, 0, err
 				}
 
 				*currentOrigin.Pointer = blocks.Pointer{
-					Address:       newPointerBlock.Address(),
-					BirthRevision: newPointerBlock.BirthRevision(),
+					Address:       newPointerMeta.Address,
+					BirthRevision: newPointerMeta.BirthRevision,
 				}
 				*currentOrigin.BlockType = blocks.PointerBlockType
 
-				newPointerBlock.meta.PostCommitFunc = c.newPointerBlockPostCommitFunc(
+				newPointerMeta.PostCommitFunc = c.newPointerBlockPostCommitFunc(
 					currentOrigin,
+					parentBlockMeta,
 					newPointerBlock,
+					newPointerMeta,
 				)
 
 				for _, meta := range pointerTrace {
-					meta.NReferences -= leafBlock.meta.NCommits
+					meta.NReferences -= leafMeta.NCommits
 				}
 
-				newPointerBlock.meta.NReferences = 1
-				pointerTrace = append(pointerTrace, newPointerBlock.meta)
+				newPointerMeta.NReferences = nReferences
+				pointerTrace = append(pointerTrace, newPointerMeta)
 
-				returnedBlock, err := NewBlock[T](c)
+				returnedBlock, returnedMeta, err := newBlock[T](c)
 				if err != nil {
-					return Trace[T]{}, 0, err
+					return nil, nil, 0, err
 				}
 
 				returnedPointerIndex := tagReminder % pointer.PointersPerBlock
-				newPointerBlock.Block.Pointers[returnedPointerIndex] = blocks.Pointer{
-					Address:       returnedBlock.Address(),
-					BirthRevision: returnedBlock.BirthRevision(),
+				newPointerBlock.Pointers[returnedPointerIndex] = blocks.Pointer{
+					Address:       returnedMeta.Address,
+					BirthRevision: returnedMeta.BirthRevision,
 				}
-				newPointerBlock.Block.PointedBlockTypes[returnedPointerIndex] = blocks.LeafBlockType
+				newPointerBlock.PointedBlockTypes[returnedPointerIndex] = blocks.LeafBlockType
 
 				origin := BlockOrigin{
-					parentBlockMeta: newPointerBlock.meta,
-					Pointer:         &newPointerBlock.Block.Pointers[returnedPointerIndex],
-					BlockType:       &newPointerBlock.Block.PointedBlockTypes[returnedPointerIndex],
+					Pointer:   &newPointerBlock.Pointers[returnedPointerIndex],
+					BlockType: &newPointerBlock.PointedBlockTypes[returnedPointerIndex],
 				}
 
-				returnedBlock.meta.PostCommitFunc = newLeafBlockPostCommitFunc(
+				returnedMeta.PostCommitFunc = newLeafBlockPostCommitFunc(
 					c,
 					origin,
+					newPointerMeta,
 					returnedBlock,
+					returnedMeta,
 				)
 
-				returnedBlock.meta.NReferences++ // to prevent unloading when new blocks are created as a result of split
+				returnedMeta.NReferences = nReferences
 
 				newBlockForTagReminderFunc := func(oldTagReminder uint64) (*T, uint64, error) {
-					var newBlock Block[T]
+					var block *T
+					var blockMeta *blockMetadata
 					pointerIndex := oldTagReminder % pointer.PointersPerBlock
-					if newPointerBlock.Block.PointedBlockTypes[pointerIndex] == blocks.FreeBlockType {
+					if newPointerBlock.PointedBlockTypes[pointerIndex] == blocks.FreeBlockType {
 						var err error
-						newBlock, err = NewBlock[T](c)
+						block, blockMeta, err = newBlock[T](c)
 						if err != nil {
 							return nil, 0, err
 						}
 
-						newPointerBlock.Block.Pointers[pointerIndex] = blocks.Pointer{
-							Address:       newBlock.Address(),
-							BirthRevision: newBlock.BirthRevision(),
+						newPointerBlock.Pointers[pointerIndex] = blocks.Pointer{
+							Address:       blockMeta.Address,
+							BirthRevision: blockMeta.BirthRevision,
 						}
-						newPointerBlock.Block.PointedBlockTypes[pointerIndex] = blocks.LeafBlockType
+						newPointerBlock.PointedBlockTypes[pointerIndex] = blocks.LeafBlockType
 					} else {
 						var err error
-						newBlock, err = FetchBlock[T](c, &newPointerBlock.Block.Pointers[pointerIndex])
+						block, blockMeta, err = fetchBlock[T](c, &newPointerBlock.Pointers[pointerIndex])
 						if err != nil {
 							return nil, 0, err
 						}
 					}
 
-					newBlock.meta.PostCommitFunc = newLeafBlockPostCommitFunc(
+					blockMeta.PostCommitFunc = newLeafBlockPostCommitFunc(
 						c,
 						BlockOrigin{
-							parentBlockMeta: newPointerBlock.meta,
-							Pointer:         &newPointerBlock.Block.Pointers[pointerIndex],
-							BlockType:       &newPointerBlock.Block.PointedBlockTypes[pointerIndex],
+							Pointer:   &newPointerBlock.Pointers[pointerIndex],
+							BlockType: &newPointerBlock.PointedBlockTypes[pointerIndex],
 						},
-						newBlock,
+						newPointerMeta,
+						block,
+						blockMeta,
 					)
 
-					// All the pointers in the trace mut be incremented because this is new block which didn't pass
-					// the standard trace flow.
-					for _, meta := range pointerTrace {
-						meta.NReferences++
+					if blockMeta.NCommits == 0 {
+						// All the pointers in the trace mut be incremented because this is new block which didn't pass
+						// the standard trace flow.
+						for _, meta := range pointerTrace {
+							meta.NReferences++
+						}
+						c.dirtyBlock(blockMeta, 1)
 					}
-					c.dirtyBlock(newBlock.meta, 1)
 
-					return newBlock.Block, oldTagReminder / pointer.PointersPerBlock, nil
+					return block, oldTagReminder / pointer.PointersPerBlock, nil
 				}
 				if err := splitFunc(newBlockForTagReminderFunc); err != nil {
-					return Trace[T]{}, 0, err
+					return nil, nil, 0, err
 				}
 
-				c.invalidateBlock(leafBlock.meta)
+				c.invalidateBlock(leafMeta)
 
-				returnedBlock.meta.NReferences--
-
-				return Trace[T]{
+				return returnedBlock, &Trace{
 					c:             c,
+					meta:          returnedMeta,
 					pointerBlocks: pointerTrace,
-					origin:        origin,
-					Block:         returnedBlock,
+					parentTrace:   parentTrace,
 				}, tagReminder / pointer.PointersPerBlock, nil
 			}
 
-			return tracedBlock, tagReminder, true, nil
+			return leafBlock, tracedBlock, splitFunc, tagReminder, nil
 		case blocks.PointerBlockType:
-			pointerBlock, err := FetchBlock[pointer.Block](c, currentOrigin.Pointer)
+			pointerBlock, pointerBlockMeta, err := fetchBlock[pointer.Block](c, currentOrigin.Pointer)
 			if err != nil {
-				return Trace[T]{}, 0, false, err
+				return nil, nil, nil, 0, err
 			}
-			pointerBlock.meta.NReferences++
-			pointerBlock.meta.PostCommitFunc = c.newPointerBlockPostCommitFunc(
+			pointerBlockMeta.NReferences += nReferences
+			pointerBlockMeta.PostCommitFunc = c.newPointerBlockPostCommitFunc(
 				currentOrigin,
+				parentBlockMeta,
 				pointerBlock,
+				pointerBlockMeta,
 			)
 
-			pointerTrace = append(pointerTrace, pointerBlock.meta)
+			pointerTrace = append(pointerTrace, pointerBlockMeta)
 
 			pointerIndex := tagReminder % pointer.PointersPerBlock
 			tagReminder /= pointer.PointersPerBlock
 
-			currentOrigin.parentBlockMeta = pointerBlock.meta
-			currentOrigin.Pointer = &pointerBlock.Block.Pointers[pointerIndex]
-			currentOrigin.BlockType = &pointerBlock.Block.PointedBlockTypes[pointerIndex]
+			parentBlockMeta = pointerBlockMeta
+			currentOrigin.Pointer = &pointerBlock.Pointers[pointerIndex]
+			currentOrigin.BlockType = &pointerBlock.PointedBlockTypes[pointerIndex]
 		}
 	}
 }
 
 func (c *Cache) newPointerBlockPostCommitFunc(
 	origin BlockOrigin,
-	pointerBlock Block[pointer.Block],
+	parentBlockMeta *blockMetadata,
+	pointerBlock *pointer.Block,
+	pointerBlockMeta *blockMetadata,
 ) func() error {
 	return func() error {
 		*origin.Pointer = blocks.Pointer{
-			Checksum:      blocks.BlockChecksum(pointerBlock.Block),
-			Address:       pointerBlock.Address(),
-			BirthRevision: pointerBlock.BirthRevision(),
+			Checksum:      blocks.BlockChecksum(pointerBlock),
+			Address:       pointerBlockMeta.Address,
+			BirthRevision: pointerBlockMeta.BirthRevision,
 		}
 		*origin.BlockType = blocks.PointerBlockType
 
-		if origin.parentBlockMeta != nil {
-			origin.parentBlockMeta.NReferences -= pointerBlock.meta.NCommits
-			c.dirtyBlock(origin.parentBlockMeta, pointerBlock.meta.NCommits)
+		if parentBlockMeta != nil {
+			parentBlockMeta.NReferences -= pointerBlockMeta.NCommits
+			c.dirtyBlock(parentBlockMeta, pointerBlockMeta.NCommits)
 		}
 
 		return nil
@@ -256,19 +280,21 @@ func (c *Cache) newPointerBlockPostCommitFunc(
 func newLeafBlockPostCommitFunc[T blocks.Block](
 	c *Cache,
 	origin BlockOrigin,
-	leafBlock Block[T],
+	parentBlockMeta *blockMetadata,
+	leafBlock *T,
+	leafBlockMeta *blockMetadata,
 ) func() error {
 	return func() error {
 		*origin.Pointer = blocks.Pointer{
-			Checksum:      blocks.BlockChecksum(leafBlock.Block),
-			Address:       leafBlock.Address(),
-			BirthRevision: leafBlock.BirthRevision(),
+			Checksum:      blocks.BlockChecksum(leafBlock),
+			Address:       leafBlockMeta.Address,
+			BirthRevision: leafBlockMeta.BirthRevision,
 		}
 		*origin.BlockType = blocks.LeafBlockType
 
-		if origin.parentBlockMeta != nil {
-			origin.parentBlockMeta.NReferences -= leafBlock.meta.NCommits
-			c.dirtyBlock(origin.parentBlockMeta, leafBlock.meta.NCommits)
+		if parentBlockMeta != nil {
+			parentBlockMeta.NReferences -= leafBlockMeta.NCommits
+			c.dirtyBlock(parentBlockMeta, leafBlockMeta.NCommits)
 		}
 
 		return nil
@@ -276,28 +302,26 @@ func newLeafBlockPostCommitFunc[T blocks.Block](
 }
 
 // Trace stores the trace of incremented pointer blocks leading to the final leaf node
-type Trace[T blocks.Block] struct {
-	Block Block[T]
-
+type Trace struct {
 	c             *Cache
-	pointerBlocks []*metadata
-	origin        BlockOrigin
-	splitFunc     func(splitFunc func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*T, uint64, error)) error) (Trace[T], uint64, error)
-}
-
-// Split replaces a leaf block with a new pointer block and triggers redistribution of existing items between new set of leaf blocks.
-func (t Trace[T]) Split(splitFunc func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*T, uint64, error)) error) (Trace[T], uint64, error) {
-	return t.splitFunc(splitFunc)
+	meta          *blockMetadata
+	pointerBlocks []*blockMetadata
+	parentTrace   *Trace
 }
 
 // Commit marks block as dirty, meaning that changes will be saved to the device later.
-func (t Trace[T]) Commit() {
-	t.c.dirtyBlock(t.Block.meta, 1)
+func (t Trace) Commit() {
+	t.meta.NReferences--
+	t.c.dirtyBlock(t.meta, 1)
 }
 
 // Release is used to decrement references to pointer blocks if leaf block has not been modified.
-func (t Trace[T]) Release() {
+func (t Trace) Release() {
+	t.meta.NReferences--
 	for _, pointerBlock := range t.pointerBlocks {
 		pointerBlock.NReferences--
+	}
+	if t.parentTrace != nil {
+		t.parentTrace.Release()
 	}
 }

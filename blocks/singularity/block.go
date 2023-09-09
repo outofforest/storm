@@ -12,11 +12,8 @@ type Block struct {
 	NBlocks      uint64
 	NextObjectID blocks.ObjectID
 
-	RootData    blocks.Pointer
-	RootObjects blocks.Pointer
-
-	RootDataBlockType    blocks.BlockType
-	RootObjectsBlockType blocks.BlockType
+	SpacePointer   blocks.Pointer
+	SpaceBlockType blocks.BlockType
 
 	// TODO (wojciech): Replace with correct (de)allocation mechanism
 	LastAllocatedBlock blocks.BlockAddress

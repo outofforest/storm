@@ -19,9 +19,9 @@ type Cache struct {
 	store             *persistence.Store
 	nBlocks           uint64
 	data              []byte
-	blocks            []metadata
+	blocks            []blockMetadata
 	addressingOffsets []uint64
-	dirtyBlocks       map[*metadata]struct{} // TODO (wojciech): Limit the number of dirty blocks
+	dirtyBlocks       map[*blockMetadata]struct{} // TODO (wojciech): Limit the number of dirty blocks
 	singularityBlock  photon.Union[*singularity.Block]
 }
 
@@ -34,7 +34,7 @@ func New(store *persistence.Store, size int64) (*Cache, error) {
 
 	nBlocks := uint64(size) / uint64(blocks.BlockSize)
 	data := make([]byte, nBlocks*uint64(blocks.BlockSize))
-	bs := make([]metadata, nBlocks)
+	bs := make([]blockMetadata, nBlocks)
 	for i, offset := 0, int64(0); i < len(bs); i, offset = i+1, offset+blocks.BlockSize {
 		bs[i].Data = data[offset : offset+blocks.BlockSize]
 	}
@@ -50,7 +50,7 @@ func New(store *persistence.Store, size int64) (*Cache, error) {
 		data:              data,
 		blocks:            bs,
 		addressingOffsets: addressingOffsets,
-		dirtyBlocks:       map[*metadata]struct{}{},
+		dirtyBlocks:       map[*blockMetadata]struct{}{},
 		singularityBlock:  sBlock,
 	}, nil
 }
@@ -110,7 +110,7 @@ func (c *Cache) commitData() error {
 	return nil
 }
 
-func (c *Cache) commitBlock(meta *metadata) error {
+func (c *Cache) commitBlock(meta *blockMetadata) error {
 	if meta.BirthRevision <= c.singularityBlock.V.Revision {
 		c.singularityBlock.V.LastAllocatedBlock++
 		meta.Address = c.singularityBlock.V.LastAllocatedBlock
@@ -141,7 +141,7 @@ func (c *Cache) fetchBlock(
 	birthRevision uint64,
 	nBytes int64,
 	expectedChecksum blocks.Hash,
-) (*metadata, error) {
+) (*blockMetadata, error) {
 	if address > c.singularityBlock.V.LastAllocatedBlock {
 		return nil, errors.Errorf("block %d does not exist", address)
 	}
@@ -166,7 +166,7 @@ func (c *Cache) fetchBlock(
 	return meta, nil
 }
 
-func (c *Cache) newBlock() (*metadata, error) {
+func (c *Cache) newBlock() (*blockMetadata, error) {
 	c.singularityBlock.V.LastAllocatedBlock++
 	meta, err := c.findCachedBlock(c.singularityBlock.V.LastAllocatedBlock, c.singularityBlock.V.Revision+1)
 	if err != nil {
@@ -179,7 +179,7 @@ func (c *Cache) newBlock() (*metadata, error) {
 	return meta, nil
 }
 
-func (c *Cache) findCachedBlock(address blocks.BlockAddress, birthRevision uint64) (*metadata, error) {
+func (c *Cache) findCachedBlock(address blocks.BlockAddress, birthRevision uint64) (*blockMetadata, error) {
 	// TODO (wojciech): Implement cache pruning based on hit metric
 
 	cacheSeed := uint64(address) % c.nBlocks
@@ -245,12 +245,12 @@ loop:
 	return meta, nil
 }
 
-func (c *Cache) dirtyBlock(meta *metadata, nCommits uint64) {
+func (c *Cache) dirtyBlock(meta *blockMetadata, nCommits uint64) {
 	meta.NCommits += nCommits
 	c.dirtyBlocks[meta] = struct{}{}
 }
 
-func (c *Cache) invalidateBlock(meta *metadata) {
+func (c *Cache) invalidateBlock(meta *blockMetadata) {
 	delete(c.dirtyBlocks, meta)
 	meta.State = invalidBlockState
 	meta.NCommits = 0
@@ -258,28 +258,23 @@ func (c *Cache) invalidateBlock(meta *metadata) {
 	meta.PostCommitFunc = nil
 }
 
-// FetchBlock returns structure representing existing block of particular type.
-func FetchBlock[T blocks.Block](
+func fetchBlock[T blocks.Block](
 	cache *Cache,
 	pointer *blocks.Pointer,
-) (Block[T], error) {
+) (*T, *blockMetadata, error) {
 	var v T
 	meta, err := cache.fetchBlock(pointer.Address, pointer.BirthRevision, int64(unsafe.Sizeof(v)), pointer.Checksum)
 	if err != nil {
-		return Block[T]{}, err
+		return nil, nil, err
 	}
 
-	return Block[T]{
-		meta:  meta,
-		Block: photon.FromBytes[T](meta.Data),
-	}, nil
+	return photon.FromBytes[T](meta.Data), meta, nil
 }
 
-// NewBlock returns structure representing new block of particular type.
-func NewBlock[T blocks.Block](c *Cache) (Block[T], error) {
+func newBlock[T blocks.Block](c *Cache) (*T, *blockMetadata, error) {
 	meta, err := c.newBlock()
 	if err != nil {
-		return Block[T]{}, err
+		return nil, nil, err
 	}
 
 	p := photon.NewFromBytes[T](meta.Data)
@@ -288,8 +283,5 @@ func NewBlock[T blocks.Block](c *Cache) (Block[T], error) {
 	// causing mismatch in hashes.
 	copy(p.B, zeroContent)
 
-	return Block[T]{
-		meta:  meta,
-		Block: p.V,
-	}, nil
+	return p.V, meta, nil
 }
