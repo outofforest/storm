@@ -48,6 +48,7 @@ func GetObjectID(
 func EnsureObjectID(
 	c *cache.Cache,
 	origin cache.BlockOrigin,
+	parentTrace *cache.Trace,
 	key []byte,
 ) (blocks.ObjectID, error) {
 	if len(key) == 0 {
@@ -57,54 +58,56 @@ func EnsureObjectID(
 		return 0, errors.Errorf("maximum key component length exceeded, maximum: %d, actual: %d", objectlist.MaxKeyComponentLength, len(key))
 	}
 
-	block, tagReminder, _, err := cache.TraceTagForUpdating[objectlist.Block](
+	block, trace, splitFunc, tagReminder, err := cache.TraceTagForUpdating[objectlist.Block](
 		c,
 		origin,
+		parentTrace,
 		xxhash.Sum64(key),
+		1,
 	)
 	if err != nil {
 		return 0, err
 	}
 
-	index, chunkFound := findChunkPointerForKey(block.Block.Block, key, tagReminder)
-	if chunkFound && block.Block.Block.ChunkPointerStates[index] == objectlist.DefinedChunkState {
-		block.Release()
-		return block.Block.Block.ObjectLinks[index], nil
+	index, chunkFound := findChunkPointerForKey(block, key, tagReminder)
+	if chunkFound && block.ChunkPointerStates[index] == objectlist.DefinedChunkState {
+		trace.Release()
+		return block.ObjectLinks[index], nil
 	}
 
-	if block.Block.Block.NUsedChunks >= objectlist.SplitTrigger {
+	if block.NUsedChunks >= objectlist.SplitTrigger {
 		// TODO (wojciech): Check if split is possible - if all the keys have the same hash then it is not.
 
 		var err error
-		block, tagReminder, err = block.Split(func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*objectlist.Block, uint64, error)) error {
-			return splitBlock(block.Block.Block, newBlockForTagReminderFunc)
+		block, trace, tagReminder, err = splitFunc(func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*objectlist.Block, uint64, error)) error {
+			return splitBlock(block, newBlockForTagReminderFunc)
 		})
 		if err != nil {
 			return 0, err
 		}
 
-		if block.Block.Block.NUsedChunks == 0 {
-			initFreeChunkList(block.Block.Block)
+		if block.NUsedChunks == 0 {
+			initFreeChunkList(block)
 		}
 
-		index, chunkFound = findChunkPointerForKey(block.Block.Block, key, tagReminder)
+		index, chunkFound = findChunkPointerForKey(block, key, tagReminder)
 	}
 
 	if !chunkFound {
 		return 0, errors.Errorf("cannot find chunk for key %s", hex.EncodeToString(key))
 	}
 
-	if err := setKeyInChunks(block.Block.Block, index, key, tagReminder); err != nil {
+	if err := setKeyInChunks(block, index, key, tagReminder); err != nil {
 		return 0, err
 	}
 
 	sBlock := c.SingularityBlock()
-	block.Block.Block.ObjectLinks[index] = sBlock.NextObjectID
+	block.ObjectLinks[index] = sBlock.NextObjectID
 	sBlock.NextObjectID++
 
-	block.Commit()
+	trace.Commit()
 
-	return block.Block.Block.ObjectLinks[index], nil
+	return block.ObjectLinks[index], nil
 }
 
 func verifyKeyInChunks(key []byte, tagReminder uint64, block *objectlist.Block, index uint16) bool {

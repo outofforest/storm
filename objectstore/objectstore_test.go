@@ -60,7 +60,7 @@ func TestSetGet(t *testing.T) {
 
 	// Set the object
 
-	requireT.NoError(SetObject[item](c, origin, 10, 1, item1))
+	requireT.NoError(SetObject[item](c, origin, nil, 10, 1, item1))
 
 	// Get the object now
 
@@ -71,7 +71,7 @@ func TestSetGet(t *testing.T) {
 
 	// Set the second object
 
-	requireT.NoError(SetObject[item](c, origin, 10, 2, item2))
+	requireT.NoError(SetObject[item](c, origin, nil, 10, 2, item2))
 
 	// Get objects
 
@@ -106,7 +106,7 @@ func TestSetGet(t *testing.T) {
 
 	// Update existing object
 
-	requireT.NoError(SetObject[item](c, origin, 10, 2, item3))
+	requireT.NoError(SetObject[item](c, origin, nil, 10, 2, item3))
 	object2, exists, err = GetObject[item](c, origin, 10, 2)
 	requireT.NoError(err)
 	requireT.True(exists)
@@ -160,7 +160,7 @@ func TestStoringBatches(t *testing.T) {
 	for k, i := 0, 0; i < nBatches; i++ {
 		startK := k
 		for j := 0; j < batchSize; j, k = j+1, k+1 {
-			requireT.NoError(SetObject[item](c, origin, objectsPerBlock, blocks.ObjectID(k), item{
+			requireT.NoError(SetObject[item](c, origin, nil, objectsPerBlock, blocks.ObjectID(k), item{
 				Field1: k,
 				Field2: 1,
 			}))
@@ -183,7 +183,7 @@ func TestStoringBatches(t *testing.T) {
 
 		k = startK
 		for j := 0; j < batchSize; j, k = j+1, k+1 {
-			requireT.NoError(SetObject[item](c, origin, objectsPerBlock, blocks.ObjectID(k), item{
+			requireT.NoError(SetObject[item](c, origin, nil, objectsPerBlock, blocks.ObjectID(k), item{
 				Field1: k,
 				Field2: 2,
 			}))

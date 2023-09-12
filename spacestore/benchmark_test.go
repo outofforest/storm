@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/outofforest/storm/blocks"
-	"github.com/outofforest/storm/blocks/spacelist"
 	"github.com/outofforest/storm/cache"
 	"github.com/outofforest/storm/persistence"
 	"github.com/outofforest/storm/pkg/filedev"
@@ -39,21 +38,16 @@ func BenchmarkSpaceStore(b *testing.B) {
 		c, err := cache.New(s, 500*1024*1024)
 		requireT.NoError(err)
 
-		sBlock := c.SingularityBlock()
+		var blockType blocks.BlockType
 		origin := cache.BlockOrigin{
-			Pointer:   &sBlock.RootData,
-			BlockType: &sBlock.RootDataBlockType,
+			Pointer:   &blocks.Pointer{},
+			BlockType: &blockType,
 		}
 
 		b.StartTimer()
 		func() {
 			for i := 0; i < size; i++ {
-				space, trace, _ := EnsureSpace(c, origin, blocks.SpaceID(i))
-
-				space.State = spacelist.DefinedSpaceState
-				space.KeyStoreBlockType = blocks.LeafBlockType
-				space.ObjectStoreBlockType = blocks.LeafBlockType
-
+				_, _, trace, _ := EnsureSpace(c, origin, blocks.SpaceID(i))
 				trace.Commit()
 			}
 
@@ -62,7 +56,7 @@ func BenchmarkSpaceStore(b *testing.B) {
 
 		func() {
 			for i := 0; i < size; i++ {
-				_, _, _ = GetSpace(c, origin, blocks.SpaceID(i))
+				_, _, _, _ = GetSpace(c, origin, blocks.SpaceID(i))
 			}
 		}()
 		b.StopTimer()

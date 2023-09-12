@@ -14,7 +14,7 @@ const (
 	invalidBlockState
 )
 
-type metadata struct {
+type blockMetadata struct {
 	Data           []byte
 	Address        blocks.BlockAddress
 	BirthRevision  uint64
@@ -28,22 +28,4 @@ type metadata struct {
 type BlockOrigin struct {
 	Pointer   *blocks.Pointer
 	BlockType *blocks.BlockType
-
-	parentBlockMeta *metadata
-}
-
-// Block represents block stored in cache.
-type Block[T blocks.Block] struct {
-	meta  *metadata
-	Block *T
-}
-
-// Address returns address of the block.
-func (b Block[T]) Address() blocks.BlockAddress {
-	return b.meta.Address
-}
-
-// BirthRevision returns revision when block was created.
-func (b Block[T]) BirthRevision() uint64 {
-	return b.meta.BirthRevision
 }

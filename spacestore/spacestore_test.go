@@ -6,7 +6,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/outofforest/storm/blocks"
-	"github.com/outofforest/storm/blocks/spacelist"
 	"github.com/outofforest/storm/cache"
 	"github.com/outofforest/storm/persistence"
 	"github.com/outofforest/storm/pkg/memdev"
@@ -37,34 +36,39 @@ func TestSetGet(t *testing.T) {
 
 	// Space does not exist
 
-	_, exists, err := GetSpace(c, origin, 1)
+	_, _, exists, err := GetSpace(c, origin, 1)
 	requireT.NoError(err)
 	requireT.False(exists)
 
 	// Set the space
 
-	space, trace, err := EnsureSpace(c, origin, 1)
+	keyOrigin, objectOrigin, trace, err := EnsureSpace(c, origin, 1)
 	requireT.NoError(err)
-	requireT.NotNil(space)
-	requireT.Equal(spacelist.FreeSpaceState, space.State)
+	requireT.Equal(blocks.FreeBlockType, *keyOrigin.BlockType)
+	requireT.Equal(blocks.FreeBlockType, *objectOrigin.BlockType)
 
-	space.State = spacelist.DefinedSpaceState
+	*keyOrigin.BlockType = blocks.LeafBlockType
+	*objectOrigin.BlockType = blocks.LeafBlockType
+
+	trace.Commit()
 	trace.Commit()
 
 	// Get the space now
 
-	space, exists, err = GetSpace(c, origin, 1)
+	keyOrigin, objectOrigin, exists, err = GetSpace(c, origin, 1)
 	requireT.NoError(err)
 	requireT.True(exists)
-	requireT.Equal(spacelist.DefinedSpaceState, space.State)
+	requireT.Equal(blocks.LeafBlockType, *keyOrigin.BlockType)
+	requireT.Equal(blocks.LeafBlockType, *objectOrigin.BlockType)
 
 	// Ensuring space again should return the same space
 
-	space, trace, err = EnsureSpace(c, origin, 1)
+	keyOrigin, objectOrigin, trace, err = EnsureSpace(c, origin, 1)
 	requireT.NoError(err)
-	requireT.NotNil(space)
-	requireT.Equal(spacelist.DefinedSpaceState, space.State)
+	requireT.Equal(blocks.LeafBlockType, *keyOrigin.BlockType)
+	requireT.Equal(blocks.LeafBlockType, *objectOrigin.BlockType)
 
+	trace.Release()
 	trace.Release()
 
 	// Commit changes
@@ -76,17 +80,18 @@ func TestSetGet(t *testing.T) {
 	c, err = cache.New(s, cacheSize)
 	requireT.NoError(err)
 
-	space, trace, err = EnsureSpace(c, origin, 1)
+	keyOrigin, objectOrigin, trace, err = EnsureSpace(c, origin, 1)
 	requireT.NoError(err)
-	requireT.NotNil(space)
-	requireT.Equal(spacelist.DefinedSpaceState, space.State)
+	requireT.Equal(blocks.LeafBlockType, *keyOrigin.BlockType)
+	requireT.Equal(blocks.LeafBlockType, *objectOrigin.BlockType)
 
 	trace.Release()
 
-	space, exists, err = GetSpace(c, origin, 1)
+	keyOrigin, objectOrigin, exists, err = GetSpace(c, origin, 1)
 	requireT.NoError(err)
 	requireT.True(exists)
-	requireT.Equal(spacelist.DefinedSpaceState, space.State)
+	requireT.Equal(blocks.LeafBlockType, *keyOrigin.BlockType)
+	requireT.Equal(blocks.LeafBlockType, *objectOrigin.BlockType)
 }
 
 func TestStoringBatches(t *testing.T) {
@@ -116,17 +121,16 @@ func TestStoringBatches(t *testing.T) {
 	for k, i := 0, 0; i < nBatches; i++ {
 		startK := k
 		for j := 0; j < batchSize; j, k = j+1, k+1 {
-			space, trace, err := EnsureSpace(c, origin, blocks.SpaceID(k))
+			keyOrigin, storeOrigin, trace, err := EnsureSpace(c, origin, blocks.SpaceID(k))
 			requireT.NoError(err)
-			requireT.NotNil(space)
-			requireT.Equal(spacelist.FreeSpaceState, space.State)
-			requireT.Equal(blocks.FreeBlockType, space.KeyStoreBlockType)
-			requireT.Equal(blocks.FreeBlockType, space.ObjectStoreBlockType)
+			*keyOrigin.Pointer = blocks.Pointer{
+				Address: blocks.BlockAddress(k),
+			}
+			*storeOrigin.Pointer = blocks.Pointer{
+				Address: blocks.BlockAddress(k),
+			}
 
-			space.State = spacelist.DefinedSpaceState
-			space.KeyStoreBlockType = blocks.LeafBlockType
-			space.ObjectStoreBlockType = blocks.LeafBlockType
-
+			trace.Commit()
 			trace.Commit()
 		}
 
@@ -134,13 +138,11 @@ func TestStoringBatches(t *testing.T) {
 
 		k = startK
 		for j := 0; j < batchSize; j, k = j+1, k+1 {
-			space, exists, err := GetSpace(c, origin, blocks.SpaceID(k))
+			keyOrigin, storeOrigin, exists, err := GetSpace(c, origin, blocks.SpaceID(k))
 			requireT.NoError(err)
 			requireT.True(exists)
-			requireT.NotNil(space)
-			requireT.Equal(spacelist.DefinedSpaceState, space.State)
-			requireT.Equal(blocks.LeafBlockType, space.KeyStoreBlockType)
-			requireT.Equal(blocks.LeafBlockType, space.ObjectStoreBlockType)
+			requireT.Equal(blocks.BlockAddress(k), keyOrigin.Pointer.Address)
+			requireT.Equal(blocks.BlockAddress(k), storeOrigin.Pointer.Address)
 		}
 
 		// Commit changes
@@ -148,13 +150,16 @@ func TestStoringBatches(t *testing.T) {
 
 		k = startK
 		for j := 0; j < batchSize; j, k = j+1, k+1 {
-			space, trace, err := EnsureSpace(c, origin, blocks.SpaceID(k))
+			keyOrigin, storeOrigin, trace, err := EnsureSpace(c, origin, blocks.SpaceID(k))
 			requireT.NoError(err)
-			requireT.NotNil(space)
-			requireT.Equal(spacelist.DefinedSpaceState, space.State)
-			requireT.Equal(blocks.LeafBlockType, space.KeyStoreBlockType)
-			requireT.Equal(blocks.LeafBlockType, space.ObjectStoreBlockType)
+			*keyOrigin.Pointer = blocks.Pointer{
+				Address: blocks.BlockAddress(k),
+			}
+			*storeOrigin.Pointer = blocks.Pointer{
+				Address: blocks.BlockAddress(k),
+			}
 
+			trace.Release()
 			trace.Release()
 		}
 	}
@@ -163,13 +168,11 @@ func TestStoringBatches(t *testing.T) {
 
 	for k, i := 0, 0; i < nBatches; i++ {
 		for j := 0; j < batchSize; j, k = j+1, k+1 {
-			space, exists, err := GetSpace(c, origin, blocks.SpaceID(k))
+			keyOrigin, storeOrigin, exists, err := GetSpace(c, origin, blocks.SpaceID(k))
 			requireT.NoError(err)
 			requireT.True(exists)
-			requireT.NotNil(space)
-			requireT.Equal(spacelist.DefinedSpaceState, space.State)
-			requireT.Equal(blocks.LeafBlockType, space.KeyStoreBlockType)
-			requireT.Equal(blocks.LeafBlockType, space.ObjectStoreBlockType)
+			requireT.Equal(blocks.BlockAddress(k), keyOrigin.Pointer.Address)
+			requireT.Equal(blocks.BlockAddress(k), storeOrigin.Pointer.Address)
 		}
 	}
 
@@ -182,13 +185,11 @@ func TestStoringBatches(t *testing.T) {
 
 	for k, i := 0, 0; i < nBatches; i++ {
 		for j := 0; j < batchSize; j, k = j+1, k+1 {
-			space, exists, err := GetSpace(c, origin, blocks.SpaceID(k))
+			keyOrigin, storeOrigin, exists, err := GetSpace(c, origin, blocks.SpaceID(k))
 			requireT.NoError(err)
 			requireT.True(exists)
-			requireT.NotNil(space)
-			requireT.Equal(spacelist.DefinedSpaceState, space.State)
-			requireT.Equal(blocks.LeafBlockType, space.KeyStoreBlockType)
-			requireT.Equal(blocks.LeafBlockType, space.ObjectStoreBlockType)
+			requireT.Equal(blocks.BlockAddress(k), keyOrigin.Pointer.Address)
+			requireT.Equal(blocks.BlockAddress(k), storeOrigin.Pointer.Address)
 		}
 	}
 }

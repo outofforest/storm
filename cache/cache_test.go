@@ -67,13 +67,13 @@ func TestFetchBlockByAddress(t *testing.T) {
 	_, err = dev.Write(newBlock.B)
 	requireT.NoError(err)
 
-	block, err := FetchBlock[pointer.Block](cache, &blocks.Pointer{
+	block, blockMeta, err := fetchBlock[pointer.Block](cache, &blocks.Pointer{
 		Checksum: blocks.BlockChecksum(newBlock.V),
 		Address:  1,
 	})
 	requireT.NoError(err)
-	requireT.Equal(blocks.BlockAddress(1), block.Address())
-	requireT.Equal(blocks.BlockAddress(21), block.Block.Pointers[pointerIndex].Address)
+	requireT.Equal(blocks.BlockAddress(1), blockMeta.Address)
+	requireT.Equal(blocks.BlockAddress(21), block.Pointers[pointerIndex].Address)
 
 	// Modify block directly on dev and read it from cache again to verify that cache returns unmodified cached version.
 
@@ -84,13 +84,13 @@ func TestFetchBlockByAddress(t *testing.T) {
 	_, err = dev.Write(newBlock.B)
 	requireT.NoError(err)
 
-	block, err = FetchBlock[pointer.Block](cache, &blocks.Pointer{
+	block, blockMeta, err = fetchBlock[pointer.Block](cache, &blocks.Pointer{
 		Checksum: blocks.BlockChecksum(newBlock.V),
 		Address:  1,
 	})
 	requireT.NoError(err)
-	requireT.Equal(blocks.BlockAddress(1), block.Address())
-	requireT.Equal(blocks.BlockAddress(21), block.Block.Pointers[pointerIndex].Address)
+	requireT.Equal(blocks.BlockAddress(1), blockMeta.Address)
+	requireT.Equal(blocks.BlockAddress(21), block.Pointers[pointerIndex].Address)
 }
 
 func TestNewBlock(t *testing.T) {
@@ -109,37 +109,37 @@ func TestNewBlock(t *testing.T) {
 
 	// Fetching block before it is created returns an error
 
-	_, err = FetchBlock[pointer.Block](cache, &blocks.Pointer{
+	_, _, err = fetchBlock[pointer.Block](cache, &blocks.Pointer{
 		Address: 2,
 	})
 	requireT.Error(err)
 
 	// Create new block
 
-	newBlock, err := NewBlock[pointer.Block](cache)
+	newBlock, newBlockMeta, err := newBlock[pointer.Block](cache)
 	requireT.NoError(err)
-	newBlock.Block.Pointers[pointerIndex].Address = 21
+	newBlock.Pointers[pointerIndex].Address = 21
 
 	// Block should be allocated
 
 	requireT.Equal(blocks.BlockAddress(1), cache.singularityBlock.V.LastAllocatedBlock)
-	requireT.Equal(blocks.BlockAddress(1), newBlock.Address())
+	requireT.Equal(blocks.BlockAddress(1), newBlockMeta.Address)
 
 	// Fetching block from cache should return new block
 
-	block, err := FetchBlock[pointer.Block](cache, &blocks.Pointer{
-		Checksum:      blocks.BlockChecksum(newBlock.Block),
-		Address:       newBlock.Address(),
+	block, blockMeta, err := fetchBlock[pointer.Block](cache, &blocks.Pointer{
+		Checksum:      blocks.BlockChecksum(newBlock),
+		Address:       newBlockMeta.Address,
 		BirthRevision: 1,
 	})
 
 	requireT.NoError(err)
-	requireT.Equal(blocks.BlockAddress(21), block.Block.Pointers[pointerIndex].Address)
-	requireT.Equal(blocks.BlockAddress(1), block.Address())
+	requireT.Equal(blocks.BlockAddress(21), block.Pointers[pointerIndex].Address)
+	requireT.Equal(blocks.BlockAddress(1), blockMeta.Address)
 
 	// Update block
 
-	block.Block.Pointers[pointerIndex].Address = 22
+	block.Pointers[pointerIndex].Address = 22
 
 	// Nothing should be updated so far on dev
 
@@ -175,21 +175,21 @@ func TestNewBlock(t *testing.T) {
 	requireT.Equal(blocks.BlockAddress(1), devSBlock.V.LastAllocatedBlock)
 	requireT.Equal(blocks.BlockAddress(22), devNewBlock.V.Pointers[pointerIndex].Address)
 
-	block, err = FetchBlock[pointer.Block](cache, &blocks.Pointer{
+	block, blockMeta, err = fetchBlock[pointer.Block](cache, &blocks.Pointer{
 		Checksum:      blocks.BlockChecksum(devNewBlock.V),
 		Address:       1,
 		BirthRevision: 1,
 	})
 	requireT.NoError(err)
-	requireT.Equal(blocks.BlockAddress(22), block.Block.Pointers[pointerIndex].Address)
-	requireT.Equal(blocks.BlockAddress(1), block.Address())
+	requireT.Equal(blocks.BlockAddress(22), block.Pointers[pointerIndex].Address)
+	requireT.Equal(blocks.BlockAddress(1), blockMeta.Address)
 
 	// Create new cache, read blocks and verify that new values are there
 
 	cache2, err := New(store, cacheSize)
 	requireT.NoError(err)
 
-	block, err = FetchBlock[pointer.Block](cache2, &blocks.Pointer{
+	block, blockMeta, err = fetchBlock[pointer.Block](cache2, &blocks.Pointer{
 		Checksum:      blocks.BlockChecksum(devNewBlock.V),
 		Address:       1,
 		BirthRevision: 1,
@@ -197,8 +197,8 @@ func TestNewBlock(t *testing.T) {
 	requireT.NoError(err)
 
 	requireT.Equal(blocks.BlockAddress(1), cache2.singularityBlock.V.LastAllocatedBlock)
-	requireT.Equal(blocks.BlockAddress(22), block.Block.Pointers[pointerIndex].Address)
-	requireT.Equal(blocks.BlockAddress(1), block.Address())
+	requireT.Equal(blocks.BlockAddress(22), block.Pointers[pointerIndex].Address)
+	requireT.Equal(blocks.BlockAddress(1), blockMeta.Address)
 }
 
 func TestChecksumIsVerifiedWhenFetching(t *testing.T) {
@@ -215,13 +215,13 @@ func TestChecksumIsVerifiedWhenFetching(t *testing.T) {
 
 	// Create new block
 
-	newBlock, err := NewBlock[pointer.Block](cache)
+	newBlock, newBlockMeta, err := newBlock[pointer.Block](cache)
 	requireT.NoError(err)
 
 	// Block is in cache so fetching with invalid checksum should work
 
-	_, err = FetchBlock[pointer.Block](cache, &blocks.Pointer{
-		Address:       newBlock.Address(),
+	_, _, err = fetchBlock[pointer.Block](cache, &blocks.Pointer{
+		Address:       newBlockMeta.Address,
 		BirthRevision: 1,
 	})
 	requireT.NoError(err)
@@ -233,25 +233,25 @@ func TestChecksumIsVerifiedWhenFetching(t *testing.T) {
 	cache2, err := New(store, cacheSize)
 	requireT.NoError(err)
 
-	_, err = FetchBlock[pointer.Block](cache2, &blocks.Pointer{
-		Address:       newBlock.Address(),
+	_, _, err = fetchBlock[pointer.Block](cache2, &blocks.Pointer{
+		Address:       newBlockMeta.Address,
 		BirthRevision: 1,
 	})
 	requireT.Error(err)
 
 	// It should succeed once correct checksum is provided
 
-	_, err = FetchBlock[pointer.Block](cache2, &blocks.Pointer{
-		Checksum:      blocks.BlockChecksum(newBlock.Block),
-		Address:       newBlock.Address(),
+	_, _, err = fetchBlock[pointer.Block](cache2, &blocks.Pointer{
+		Checksum:      blocks.BlockChecksum(newBlock),
+		Address:       newBlockMeta.Address,
 		BirthRevision: 1,
 	})
 	requireT.NoError(err)
 
 	// Again, once block is in cache checksum doesn't matter
 
-	_, err = FetchBlock[pointer.Block](cache2, &blocks.Pointer{
-		Address:       newBlock.Address(),
+	_, _, err = fetchBlock[pointer.Block](cache2, &blocks.Pointer{
+		Address:       newBlockMeta.Address,
 		BirthRevision: 1,
 	})
 	requireT.NoError(err)
@@ -282,21 +282,21 @@ func TestNewBlocksProduceConsistentResult(t *testing.T) {
 
 	// Create and commit two identical block
 
-	newBlock1, err := NewBlock[paddedStruct](cache)
+	newBlock1, newBlock1Meta, err := newBlock[paddedStruct](cache)
 	requireT.NoError(err)
-	newBlock1.Block.Field1 = 1
-	newBlock1.Block.Field2 = 0x02
-	newBlock1.Block.Field3 = 3
+	newBlock1.Field1 = 1
+	newBlock1.Field2 = 0x02
+	newBlock1.Field3 = 3
 
-	newBlock2, err := NewBlock[paddedStruct](cache)
+	newBlock2, newBlock2Meta, err := newBlock[paddedStruct](cache)
 	requireT.NoError(err)
-	newBlock2.Block.Field1 = 1
-	newBlock2.Block.Field2 = 0x02
-	newBlock2.Block.Field3 = 3
+	newBlock2.Field1 = 1
+	newBlock2.Field2 = 0x02
+	newBlock2.Field3 = 3
 
 	// Content should match
-	requireT.NotEqual(newBlock1.Address(), newBlock2.Address())
-	requireT.Equal(photon.NewFromValue(newBlock1.Block).B, photon.NewFromValue(newBlock2.Block).B)
+	requireT.NotEqual(newBlock1Meta.Address, newBlock2Meta.Address)
+	requireT.Equal(photon.NewFromValue(newBlock1).B, photon.NewFromValue(newBlock2).B)
 }
 
 func randomizeCache(t *testing.T, c *Cache) {

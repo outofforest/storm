@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/outofforest/storm/blocks"
 	"github.com/outofforest/storm/cache"
 	"github.com/outofforest/storm/persistence"
 	"github.com/outofforest/storm/pkg/filedev"
@@ -45,16 +46,16 @@ func BenchmarkKeyStore(b *testing.B) {
 		c, err := cache.New(s, 500*1024*1024)
 		requireT.NoError(err)
 
-		sBlock := c.SingularityBlock()
+		var blockType blocks.BlockType
 		origin := cache.BlockOrigin{
-			Pointer:   &sBlock.RootData,
-			BlockType: &sBlock.RootDataBlockType,
+			Pointer:   &blocks.Pointer{},
+			BlockType: &blockType,
 		}
 
 		b.StartTimer()
 		func() {
 			for i := 0; i < len(keys); i++ {
-				_, _ = EnsureObjectID(c, origin, keys[i][:])
+				_, _ = EnsureObjectID(c, origin, nil, keys[i][:])
 			}
 
 			_ = c.Commit()

@@ -46,7 +46,7 @@ func TestSetGet(t *testing.T) {
 
 	// Set
 
-	objectID, err := EnsureObjectID(c, origin, key)
+	objectID, err := EnsureObjectID(c, origin, nil, key)
 	requireT.NoError(err)
 	requireT.NoError(c.Commit())
 
@@ -105,7 +105,7 @@ func TestStoringBatches(t *testing.T) {
 	for k, i := 0, 0; i < nBatches; i++ {
 		startK := k
 		for j := 0; j < batchSize; j, k = j+1, k+1 {
-			objectID, err := EnsureObjectID(c, origin, keys[k][:])
+			objectID, err := EnsureObjectID(c, origin, nil, keys[k][:])
 			requireT.NoError(err)
 			objectIDs = append(objectIDs, objectID)
 		}
@@ -113,7 +113,7 @@ func TestStoringBatches(t *testing.T) {
 		// Verify that ensured object ID is the same before committing.
 		k = startK
 		for j := 0; j < batchSize; j, k = j+1, k+1 {
-			objectID, err := EnsureObjectID(c, origin, keys[k][:])
+			objectID, err := EnsureObjectID(c, origin, nil, keys[k][:])
 			requireT.NoError(err)
 			requireT.Equal(objectIDs[k], objectID)
 		}
@@ -135,7 +135,7 @@ func TestStoringBatches(t *testing.T) {
 		// As a side effect, it triggers references to pointer blocks to be incremented without bing committed.
 		k = startK
 		for j := 0; j < batchSize; j, k = j+1, k+1 {
-			objectID, err := EnsureObjectID(c, origin, keys[k][:])
+			objectID, err := EnsureObjectID(c, origin, nil, keys[k][:])
 			requireT.NoError(err)
 			requireT.Equal(objectIDs[k], objectID)
 		}
@@ -163,7 +163,7 @@ func TestStoringBatches(t *testing.T) {
 	// If the same key is ensured again, same ID should be returned
 
 	for i := 0; i < len(keys); i++ {
-		objectID, err := EnsureObjectID(c, origin, keys[i][:])
+		objectID, err := EnsureObjectID(c, origin, nil, keys[i][:])
 		requireT.NoError(err)
 		requireT.Equal(objectIDs[i], objectID)
 	}
@@ -185,7 +185,7 @@ func TestStoringBatches(t *testing.T) {
 	// If the same key is ensured, same ID should be returned
 
 	for i := 0; i < len(keys); i++ {
-		objectID, err := EnsureObjectID(c, origin, keys[i][:])
+		objectID, err := EnsureObjectID(c, origin, nil, keys[i][:])
 		requireT.NoError(err)
 		requireT.Equal(objectIDs[i], objectID)
 	}

@@ -41,34 +41,37 @@ func GetObject[T comparable](
 func SetObject[T comparable](
 	c *cache.Cache,
 	origin cache.BlockOrigin,
+	parentTrace *cache.Trace,
 	objectsPerBlock int,
 	objectID blocks.ObjectID,
 	object T,
 ) error {
-	block, tagReminder, _, err := cache.TraceTagForUpdating[blob.Block](
+	block, trace, splitFunc, tagReminder, err := cache.TraceTagForUpdating[blob.Block](
 		c,
 		origin,
+		parentTrace,
 		uint64(objectID),
+		1,
 	)
 	if err != nil {
 		return err
 	}
 
-	objectSlot := findObject[T](block.Block.Block, objectsPerBlock, tagReminder)
+	objectSlot := findObject[T](block, objectsPerBlock, tagReminder)
 	if objectSlot == nil || objectSlot.State != blob.DefinedObjectState {
-		objects := photon.SliceFromBytes[blob.Object[T]](block.Block.Block.Data[:], objectsPerBlock)
-		if block.Block.Block.NUsedSlots >= uint64(len(objects))*3/4 {
+		objects := photon.SliceFromBytes[blob.Object[T]](block.Data[:], objectsPerBlock)
+		if block.NUsedSlots >= uint64(len(objects))*3/4 {
 			// TODO (wojciech): Check if split makes sense, if it is the last level, then it doesn't
 
 			var err error
-			block, tagReminder, err = block.Split(func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*blob.Block, uint64, error)) error {
-				return splitBlock[T](block.Block.Block, objectsPerBlock, newBlockForTagReminderFunc)
+			block, trace, tagReminder, err = splitFunc(func(newBlockForTagReminderFunc func(oldTagReminder uint64) (*blob.Block, uint64, error)) error {
+				return splitBlock[T](block, objectsPerBlock, newBlockForTagReminderFunc)
 			})
 			if err != nil {
 				return err
 			}
 
-			objectSlot = findObject[T](block.Block.Block, objectsPerBlock, tagReminder)
+			objectSlot = findObject[T](block, objectsPerBlock, tagReminder)
 		}
 	}
 	if objectSlot == nil {
@@ -77,12 +80,12 @@ func SetObject[T comparable](
 
 	objectSlot.Object = object
 	if objectSlot.State != blob.DefinedObjectState {
-		block.Block.Block.NUsedSlots++
+		block.NUsedSlots++
 		objectSlot.ObjectIDTagReminder = tagReminder
 		objectSlot.State = blob.DefinedObjectState
 	}
 
-	block.Commit()
+	trace.Commit()
 
 	return nil
 }
