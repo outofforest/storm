@@ -68,6 +68,8 @@ func (s *Storm[T]) Set(key []byte, object T) error {
 		return err
 	}
 
+	defer spaceTrace.Release()
+
 	objectID, err := keystore.EnsureObjectID(s.c, keyOrigin, spaceTrace, key)
 	if err != nil {
 		return err

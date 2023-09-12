@@ -63,7 +63,6 @@ func EnsureObjectID(
 		origin,
 		parentTrace,
 		xxhash.Sum64(key),
-		1,
 	)
 	if err != nil {
 		return 0, err

@@ -51,7 +51,6 @@ func TestSetGet(t *testing.T) {
 	*objectOrigin.BlockType = blocks.LeafBlockType
 
 	trace.Commit()
-	trace.Commit()
 
 	// Get the space now
 
@@ -68,7 +67,6 @@ func TestSetGet(t *testing.T) {
 	requireT.Equal(blocks.LeafBlockType, *keyOrigin.BlockType)
 	requireT.Equal(blocks.LeafBlockType, *objectOrigin.BlockType)
 
-	trace.Release()
 	trace.Release()
 
 	// Commit changes
@@ -131,7 +129,6 @@ func TestStoringBatches(t *testing.T) {
 			}
 
 			trace.Commit()
-			trace.Commit()
 		}
 
 		// Get objects before committing
@@ -159,7 +156,6 @@ func TestStoringBatches(t *testing.T) {
 				Address: blocks.BlockAddress(k),
 			}
 
-			trace.Release()
 			trace.Release()
 		}
 	}

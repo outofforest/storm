@@ -51,7 +51,6 @@ func SetObject[T comparable](
 		origin,
 		parentTrace,
 		uint64(objectID),
-		1,
 	)
 	if err != nil {
 		return err
