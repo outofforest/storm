@@ -51,7 +51,6 @@ func TraceTagForUpdating[T blocks.Block](
 	origin BlockOrigin,
 	parentTrace *Trace,
 	tag uint64,
-	nReferences uint64,
 ) (*T, *Trace, SplitFunc[T], uint64, error) {
 	currentOrigin := origin
 	var parentBlockMeta *blockMetadata
@@ -60,6 +59,13 @@ func TraceTagForUpdating[T blocks.Block](
 	}
 	pointerTrace := make([]*blockMetadata, 0, 11) // TODO (wojciech): Find the right size
 	tagReminder := tag
+
+	for tmpTrace := parentTrace; tmpTrace != nil; tmpTrace = tmpTrace.parentTrace {
+		tmpTrace.meta.NReferences++
+		for _, meta := range tmpTrace.pointerBlocks {
+			meta.NReferences++
+		}
+	}
 
 	for {
 		switch *currentOrigin.BlockType {
@@ -77,7 +83,7 @@ func TraceTagForUpdating[T blocks.Block](
 				leafMeta,
 			)
 
-			leafMeta.NReferences = nReferences
+			leafMeta.NReferences = 1
 
 			*currentOrigin.Pointer = blocks.Pointer{
 				Address:       leafMeta.Address,
@@ -105,9 +111,9 @@ func TraceTagForUpdating[T blocks.Block](
 				leafMeta,
 			)
 
-			leafMeta.NReferences += nReferences
+			leafMeta.NReferences++
 
-			tracedBlock := &Trace{
+			trace := &Trace{
 				c:             c,
 				meta:          leafMeta,
 				pointerBlocks: pointerTrace,
@@ -136,8 +142,14 @@ func TraceTagForUpdating[T blocks.Block](
 				for _, meta := range pointerTrace {
 					meta.NReferences -= leafMeta.NCommits
 				}
+				for tmpTrace := parentTrace; tmpTrace != nil; tmpTrace = tmpTrace.parentTrace {
+					tmpTrace.meta.NReferences -= leafMeta.NCommits
+					for _, meta := range tmpTrace.pointerBlocks {
+						meta.NReferences -= leafMeta.NCommits
+					}
+				}
 
-				newPointerMeta.NReferences = nReferences
+				newPointerMeta.NReferences = 1
 				pointerTrace = append(pointerTrace, newPointerMeta)
 
 				returnedBlock, returnedMeta, err := newBlock[T](c)
@@ -165,7 +177,7 @@ func TraceTagForUpdating[T blocks.Block](
 					returnedMeta,
 				)
 
-				returnedMeta.NReferences = nReferences
+				returnedMeta.NReferences = 1
 
 				newBlockForTagReminderFunc := func(oldTagReminder uint64) (*T, uint64, error) {
 					var block *T
@@ -208,6 +220,12 @@ func TraceTagForUpdating[T blocks.Block](
 						for _, meta := range pointerTrace {
 							meta.NReferences++
 						}
+						for tmpTrace := parentTrace; tmpTrace != nil; tmpTrace = tmpTrace.parentTrace {
+							tmpTrace.meta.NReferences++
+							for _, meta := range tmpTrace.pointerBlocks {
+								meta.NReferences++
+							}
+						}
 						c.dirtyBlock(blockMeta, 1)
 					}
 
@@ -227,13 +245,13 @@ func TraceTagForUpdating[T blocks.Block](
 				}, tagReminder / pointer.PointersPerBlock, nil
 			}
 
-			return leafBlock, tracedBlock, splitFunc, tagReminder, nil
+			return leafBlock, trace, splitFunc, tagReminder, nil
 		case blocks.PointerBlockType:
 			pointerBlock, pointerBlockMeta, err := fetchBlock[pointer.Block](c, currentOrigin.Pointer)
 			if err != nil {
 				return nil, nil, nil, 0, err
 			}
-			pointerBlockMeta.NReferences += nReferences
+			pointerBlockMeta.NReferences++
 			pointerBlockMeta.PostCommitFunc = c.newPointerBlockPostCommitFunc(
 				currentOrigin,
 				parentBlockMeta,

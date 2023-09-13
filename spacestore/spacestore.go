@@ -52,7 +52,6 @@ func EnsureSpace(
 		origin,
 		nil,
 		uint64(spaceID),
-		2,
 	)
 	if err != nil {
 		return cache.BlockOrigin{}, cache.BlockOrigin{}, nil, err
@@ -80,9 +79,6 @@ func EnsureSpace(
 		space.State = spacelist.DefinedSpaceState
 		space.SpaceIDTagReminder = tagReminder
 	}
-
-	// TODO (wojciech): Later on, if final leaf trace is not updated, the space trace must be released
-	// TODO (wojciech): Final leaf trace must have post commit function set to commit changes in the space trace
 
 	return cache.BlockOrigin{
 			Pointer:   &space.KeyStorePointer,
