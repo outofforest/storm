@@ -208,3 +208,64 @@ func TestStoringBatches(t *testing.T) {
 		requireT.EqualValues(i, itm.Field)
 	}
 }
+
+func TestCreatingLotsOfSpaces(t *testing.T) {
+	const nSpaces = 5000
+
+	requireT := require.New(t)
+
+	dev := memdev.New(1024 * 1024 * 1024)
+	requireT.NoError(persistence.Initialize(dev, false))
+
+	s, err := persistence.OpenStore(dev)
+	requireT.NoError(err)
+
+	// Cache is intentionally small to ensure that it behaves correctly when cached blocks are unloaded.
+	c, err := cache.New(s, 15*blocks.BlockSize)
+	requireT.NoError(err)
+
+	// Set items
+
+	for i := 0; i < nSpaces; i++ {
+		storm := New[item](c, blocks.SpaceID(i), 100)
+		requireT.NoError(storm.Set([]byte{0x00}, item{Field: uint64(i)}))
+	}
+
+	// Get items before committing
+
+	for i := 0; i < nSpaces; i++ {
+		storm := New[item](c, blocks.SpaceID(i), 100)
+		itm, exists, err := storm.Get([]byte{0x00})
+		requireT.NoError(err)
+		requireT.True(exists)
+		requireT.EqualValues(i, itm.Field)
+	}
+
+	// Commit changes
+	requireT.NoError(c.Commit())
+
+	// Get items after committing
+
+	for i := 0; i < nSpaces; i++ {
+		storm := New[item](c, blocks.SpaceID(i), 100)
+		itm, exists, err := storm.Get([]byte{0x00})
+		requireT.NoError(err)
+		requireT.True(exists)
+		requireT.EqualValues(i, itm.Field)
+	}
+
+	// Create new cache
+
+	c, err = cache.New(s, 15*blocks.BlockSize)
+	requireT.NoError(err)
+
+	// Get items
+
+	for i := 0; i < nSpaces; i++ {
+		storm := New[item](c, blocks.SpaceID(i), 100)
+		itm, exists, err := storm.Get([]byte{0x00})
+		requireT.NoError(err)
+		requireT.True(exists)
+		requireT.EqualValues(i, itm.Field)
+	}
+}
