@@ -60,7 +60,7 @@ func (s *Storm[T]) Get(key []byte) (T, bool, error) {
 // Set sets object under key.
 func (s *Storm[T]) Set(key []byte, object T) error {
 	sBlock := s.c.SingularityBlock()
-	keyOrigin, objectOrigin, spaceTrace, err := spacestore.EnsureSpace(s.c, cache.BlockOrigin{
+	keyOrigin, objectOrigin, objectIndex, spaceTrace, err := spacestore.EnsureSpace(s.c, cache.BlockOrigin{
 		Pointer:   &sBlock.SpacePointer,
 		BlockType: &sBlock.SpaceBlockType,
 	}, s.spaceID)
@@ -70,7 +70,7 @@ func (s *Storm[T]) Set(key []byte, object T) error {
 
 	defer spaceTrace.Release()
 
-	objectID, err := keystore.EnsureObjectID(s.c, keyOrigin, spaceTrace, key)
+	objectID, err := keystore.EnsureObjectID(s.c, keyOrigin, spaceTrace, objectIndex, key)
 	if err != nil {
 		return err
 	}

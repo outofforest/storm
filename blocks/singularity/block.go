@@ -6,11 +6,10 @@ import (
 
 // Block is the starting block of the store. Everything starts and ends here.
 type Block struct {
-	Checksum     blocks.Hash
-	StormID      uint64
-	Revision     uint64
-	NBlocks      uint64
-	NextObjectID blocks.ObjectID
+	Checksum blocks.Hash
+	StormID  uint64
+	Revision uint64
+	NBlocks  uint64
 
 	SpacePointer   blocks.Pointer
 	SpaceBlockType blocks.BlockType

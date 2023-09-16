@@ -51,11 +51,12 @@ func BenchmarkKeyStore(b *testing.B) {
 			Pointer:   &blocks.Pointer{},
 			BlockType: &blockType,
 		}
+		var objectIndex blocks.ObjectID
 
 		b.StartTimer()
 		func() {
 			for i := 0; i < len(keys); i++ {
-				_, _ = EnsureObjectID(c, origin, nil, keys[i][:])
+				_, _ = EnsureObjectID(c, origin, nil, &objectIndex, keys[i][:])
 			}
 
 			_ = c.Commit()
