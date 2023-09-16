@@ -46,7 +46,7 @@ func EnsureSpace(
 	c *cache.Cache,
 	origin cache.BlockOrigin,
 	spaceID blocks.SpaceID,
-) (cache.BlockOrigin, cache.BlockOrigin, *cache.Trace, error) {
+) (cache.BlockOrigin, cache.BlockOrigin, *blocks.ObjectID, *cache.Trace, error) {
 	block, trace, splitFunc, tagReminder, err := cache.TraceTagForUpdating[spacelist.Block](
 		c,
 		origin,
@@ -54,7 +54,7 @@ func EnsureSpace(
 		uint64(spaceID),
 	)
 	if err != nil {
-		return cache.BlockOrigin{}, cache.BlockOrigin{}, nil, err
+		return cache.BlockOrigin{}, cache.BlockOrigin{}, nil, nil, err
 	}
 
 	space := findSpace(block, tagReminder)
@@ -66,12 +66,12 @@ func EnsureSpace(
 			return splitBlock(block, newBlockForTagReminderFunc)
 		})
 		if err != nil {
-			return cache.BlockOrigin{}, cache.BlockOrigin{}, nil, err
+			return cache.BlockOrigin{}, cache.BlockOrigin{}, nil, nil, err
 		}
 		space = findSpace(block, tagReminder)
 	}
 	if space == nil {
-		return cache.BlockOrigin{}, cache.BlockOrigin{}, nil, errors.Errorf("cannot find slot for space ID %x", spaceID)
+		return cache.BlockOrigin{}, cache.BlockOrigin{}, nil, nil, errors.Errorf("cannot find slot for space ID %x", spaceID)
 	}
 
 	if space.State != spacelist.DefinedSpaceState {
@@ -86,7 +86,7 @@ func EnsureSpace(
 		}, cache.BlockOrigin{
 			Pointer:   &space.ObjectStorePointer,
 			BlockType: &space.ObjectStoreBlockType,
-		}, trace, nil
+		}, &space.NextObjectID, trace, nil
 }
 
 func findSpace(

@@ -20,6 +20,7 @@ const (
 // Space contains information about space.
 type Space struct {
 	SpaceIDTagReminder   uint64
+	NextObjectID         blocks.ObjectID
 	KeyStorePointer      blocks.Pointer
 	ObjectStorePointer   blocks.Pointer
 	KeyStoreBlockType    blocks.BlockType

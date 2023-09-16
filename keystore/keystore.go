@@ -49,6 +49,7 @@ func EnsureObjectID(
 	c *cache.Cache,
 	origin cache.BlockOrigin,
 	parentTrace *cache.Trace,
+	objectIndex *blocks.ObjectID,
 	key []byte,
 ) (blocks.ObjectID, error) {
 	if len(key) == 0 {
@@ -100,9 +101,8 @@ func EnsureObjectID(
 		return 0, err
 	}
 
-	sBlock := c.SingularityBlock()
-	block.ObjectLinks[index] = sBlock.NextObjectID
-	sBlock.NextObjectID++
+	block.ObjectLinks[index] = *objectIndex
+	(*objectIndex)++
 
 	trace.Commit()
 

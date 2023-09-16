@@ -42,13 +42,14 @@ func TestSetGet(t *testing.T) {
 
 	// Set the space
 
-	keyOrigin, objectOrigin, trace, err := EnsureSpace(c, origin, 1)
+	keyOrigin, objectOrigin, objectIndex, trace, err := EnsureSpace(c, origin, 1)
 	requireT.NoError(err)
 	requireT.Equal(blocks.FreeBlockType, *keyOrigin.BlockType)
 	requireT.Equal(blocks.FreeBlockType, *objectOrigin.BlockType)
 
 	*keyOrigin.BlockType = blocks.LeafBlockType
 	*objectOrigin.BlockType = blocks.LeafBlockType
+	*objectIndex = 2
 
 	trace.Commit()
 
@@ -62,10 +63,11 @@ func TestSetGet(t *testing.T) {
 
 	// Ensuring space again should return the same space
 
-	keyOrigin, objectOrigin, trace, err = EnsureSpace(c, origin, 1)
+	keyOrigin, objectOrigin, objectIndex, trace, err = EnsureSpace(c, origin, 1)
 	requireT.NoError(err)
 	requireT.Equal(blocks.LeafBlockType, *keyOrigin.BlockType)
 	requireT.Equal(blocks.LeafBlockType, *objectOrigin.BlockType)
+	requireT.Equal(blocks.ObjectID(2), *objectIndex)
 
 	trace.Release()
 
@@ -78,10 +80,11 @@ func TestSetGet(t *testing.T) {
 	c, err = cache.New(s, cacheSize)
 	requireT.NoError(err)
 
-	keyOrigin, objectOrigin, trace, err = EnsureSpace(c, origin, 1)
+	keyOrigin, objectOrigin, objectIndex, trace, err = EnsureSpace(c, origin, 1)
 	requireT.NoError(err)
 	requireT.Equal(blocks.LeafBlockType, *keyOrigin.BlockType)
 	requireT.Equal(blocks.LeafBlockType, *objectOrigin.BlockType)
+	requireT.Equal(blocks.ObjectID(2), *objectIndex)
 
 	trace.Release()
 
@@ -119,7 +122,7 @@ func TestStoringBatches(t *testing.T) {
 	for k, i := 0, 0; i < nBatches; i++ {
 		startK := k
 		for j := 0; j < batchSize; j, k = j+1, k+1 {
-			keyOrigin, storeOrigin, trace, err := EnsureSpace(c, origin, blocks.SpaceID(k))
+			keyOrigin, storeOrigin, _, trace, err := EnsureSpace(c, origin, blocks.SpaceID(k))
 			requireT.NoError(err)
 			*keyOrigin.Pointer = blocks.Pointer{
 				Address: blocks.BlockAddress(k),
@@ -147,7 +150,7 @@ func TestStoringBatches(t *testing.T) {
 
 		k = startK
 		for j := 0; j < batchSize; j, k = j+1, k+1 {
-			keyOrigin, storeOrigin, trace, err := EnsureSpace(c, origin, blocks.SpaceID(k))
+			keyOrigin, storeOrigin, _, trace, err := EnsureSpace(c, origin, blocks.SpaceID(k))
 			requireT.NoError(err)
 			*keyOrigin.Pointer = blocks.Pointer{
 				Address: blocks.BlockAddress(k),

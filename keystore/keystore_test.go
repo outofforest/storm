@@ -35,6 +35,8 @@ func TestSetGet(t *testing.T) {
 		BlockType: &blockType,
 	}
 
+	var objectIndex blocks.ObjectID
+
 	// Key intentionally takes 2.5 chunks.
 	key := []byte{
 		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
@@ -46,8 +48,9 @@ func TestSetGet(t *testing.T) {
 
 	// Set
 
-	objectID, err := EnsureObjectID(c, origin, nil, key)
+	objectID, err := EnsureObjectID(c, origin, nil, &objectIndex, key)
 	requireT.NoError(err)
+	requireT.Equal(blocks.ObjectID(1), objectIndex)
 	requireT.NoError(c.Commit())
 
 	// Get from the same cache
@@ -92,6 +95,8 @@ func TestStoringBatches(t *testing.T) {
 		BlockType: &blockType,
 	}
 
+	var objectIndex blocks.ObjectID
+
 	keys := make([][48]byte, nBatches*batchSize)
 
 	// Create key-objectID pairs
@@ -105,18 +110,22 @@ func TestStoringBatches(t *testing.T) {
 	for k, i := 0, 0; i < nBatches; i++ {
 		startK := k
 		for j := 0; j < batchSize; j, k = j+1, k+1 {
-			objectID, err := EnsureObjectID(c, origin, nil, keys[k][:])
+			objectID, err := EnsureObjectID(c, origin, nil, &objectIndex, keys[k][:])
 			requireT.NoError(err)
 			objectIDs = append(objectIDs, objectID)
 		}
 
+		currentObjectIndex := objectIndex
+
 		// Verify that ensured object ID is the same before committing.
 		k = startK
 		for j := 0; j < batchSize; j, k = j+1, k+1 {
-			objectID, err := EnsureObjectID(c, origin, nil, keys[k][:])
+			objectID, err := EnsureObjectID(c, origin, nil, &objectIndex, keys[k][:])
 			requireT.NoError(err)
 			requireT.Equal(objectIDs[k], objectID)
 		}
+
+		requireT.Equal(currentObjectIndex, objectIndex)
 
 		// Get object IDs before committing
 
@@ -135,10 +144,12 @@ func TestStoringBatches(t *testing.T) {
 		// As a side effect, it triggers references to pointer blocks to be incremented without bing committed.
 		k = startK
 		for j := 0; j < batchSize; j, k = j+1, k+1 {
-			objectID, err := EnsureObjectID(c, origin, nil, keys[k][:])
+			objectID, err := EnsureObjectID(c, origin, nil, &objectIndex, keys[k][:])
 			requireT.NoError(err)
 			requireT.Equal(objectIDs[k], objectID)
 		}
+
+		requireT.Equal(currentObjectIndex, objectIndex)
 
 		// Get object IDs
 
@@ -162,11 +173,15 @@ func TestStoringBatches(t *testing.T) {
 
 	// If the same key is ensured again, same ID should be returned
 
+	currentObjectIndex := objectIndex
+
 	for i := 0; i < len(keys); i++ {
-		objectID, err := EnsureObjectID(c, origin, nil, keys[i][:])
+		objectID, err := EnsureObjectID(c, origin, nil, &objectIndex, keys[i][:])
 		requireT.NoError(err)
 		requireT.Equal(objectIDs[i], objectID)
 	}
+
+	requireT.Equal(currentObjectIndex, objectIndex)
 
 	// Create new cache
 
@@ -185,8 +200,10 @@ func TestStoringBatches(t *testing.T) {
 	// If the same key is ensured, same ID should be returned
 
 	for i := 0; i < len(keys); i++ {
-		objectID, err := EnsureObjectID(c, origin, nil, keys[i][:])
+		objectID, err := EnsureObjectID(c, origin, nil, &objectIndex, keys[i][:])
 		requireT.NoError(err)
 		requireT.Equal(objectIDs[i], objectID)
 	}
+
+	requireT.Equal(currentObjectIndex, objectIndex)
 }

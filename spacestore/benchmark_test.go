@@ -47,7 +47,7 @@ func BenchmarkSpaceStore(b *testing.B) {
 		b.StartTimer()
 		func() {
 			for i := 0; i < size; i++ {
-				_, _, trace, _ := EnsureSpace(c, origin, blocks.SpaceID(i))
+				_, _, _, trace, _ := EnsureSpace(c, origin, blocks.SpaceID(i))
 				trace.Commit()
 			}
 
